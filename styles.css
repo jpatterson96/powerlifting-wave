@@ -463,8 +463,30 @@ legend.setting-title + * {
 }
 
 .week-head {
-  margin-top: 26px;
-  padding-bottom: 6px;
+  margin-top: 8px;
+  padding: 22px 0 6px;
+  border-top: 1px solid var(--line);
+}
+
+.week-about {
+  font: 700 22px/1 var(--display);
+}
+
+/* The picked week, in one line between the wave and the days. */
+.week-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-top: 18px;
+}
+
+.week-line .week-count {
+  margin: 0;
+}
+
+.week-line .week-title {
+  font-size: 30px;
 }
 
 .week-head .btn-quiet {
@@ -512,28 +534,106 @@ legend.setting-title + * {
 
 /* ---------- Training days ---------- */
 
-.sessions {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/* Day tabs: the picked day is filled white; its light shows done, started or skipped. */
+.days {
+  display: grid;
+  grid-template-columns: repeat(var(--n), 1fr);
+  gap: 6px;
+  margin-top: 14px;
 }
 
-.session {
-  border-top: 1px solid var(--line);
+.day-tab {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 66px;
+  padding: 9px 2px 8px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: none;
 }
 
-.session-head {
+.day-tab[data-next] {
+  border-color: var(--steel);
+}
+
+.day-tab-day {
+  font: 700 19px/1 var(--display);
+}
+
+.day-tab-lift {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-tab-light {
+  width: 9px;
+  height: 9px;
+  margin-top: 2px;
+  border: 1.5px solid var(--steel);
+  border-radius: 50%;
+}
+
+.day-tab[data-status="started"] .day-tab-light {
+  border-color: var(--chalk);
+}
+
+.day-tab[data-status="done"] .day-tab-light {
+  border-color: var(--chalk);
+  background: var(--chalk);
+  box-shadow: 0 0 8px 1px rgba(238, 241, 244, 0.35);
+}
+
+.day-tab[data-status="skipped"] .day-tab-light {
+  height: 2px;
+  margin-top: 5px;
+  border: 0;
+  border-radius: 1px;
+  background: var(--steel);
+}
+
+.day-tab[data-status="skipped"] .day-tab-day {
+  color: var(--steel);
+}
+
+.day-tab[aria-pressed="true"] {
+  border-color: var(--chalk);
+  background: var(--chalk);
+  color: var(--ink);
+}
+
+.day-tab[aria-pressed="true"] .day-tab-lift {
+  color: var(--ink);
+}
+
+.day-tab[aria-pressed="true"] .day-tab-light {
+  border-color: var(--ink);
+  box-shadow: none;
+}
+
+.day-tab[aria-pressed="true"][data-status="done"] .day-tab-light,
+.day-tab[aria-pressed="true"][data-status="skipped"] .day-tab-light {
+  background: var(--ink);
+}
+
+.day-panel {
+  margin-top: 6px;
+}
+
+.day-head {
   display: grid;
   grid-template-columns: 1fr auto;
   grid-template-areas:
     "day state"
     "lift state";
   align-items: center;
-  width: 100%;
-  padding: 16px 0;
-  border: 0;
-  background: none;
-  text-align: left;
+  padding: 16px 0 14px;
 }
 
 .session-day {
@@ -555,12 +655,12 @@ legend.setting-title + * {
   font-weight: 600;
 }
 
-.session[data-next] .session-state {
+.day-panel[data-status="todo"] .session-state {
   color: var(--chalk);
 }
 
 /* A finished day gets the same white light as a good set. */
-.session[data-status="done"] .session-state::before {
+.day-panel[data-status="done"] .session-state::before {
   content: "";
   display: inline-block;
   width: 8px;
@@ -572,8 +672,8 @@ legend.setting-title + * {
   transform: translateY(-1px);
 }
 
-.session[data-status="skipped"] .session-lift,
-.session[data-status="skipped"] .session-day {
+.day-panel[data-status="skipped"] .session-lift,
+.day-panel[data-status="skipped"] .session-day {
   color: var(--steel);
 }
 

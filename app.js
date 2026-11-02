@@ -309,27 +309,28 @@ function trainView() {
   const b = block();
   const n = state.blocks.length;
   if (ui.week === null || ui.week >= b.log.length) ui.week = currentWeek(b);
-  if (ui.open === undefined) ui.open = defaultOpen(b, ui.week);
+  // One day shows at a time: the one picked, else the next to train, else the week's first.
+  if (ui.open === undefined || ui.open === null || ui.open >= b.log[ui.week].length) ui.open = defaultOpen(b, ui.week) ?? 0;
   const next = nextSession(b);
   const last = ui.week === b.log.length - 1;
   const finish = ui.week === FINISH_WEEK
     ? `<button class="btn-quiet" data-action="switch-finish">${b.finish === 'remax' ? 'Deload this week instead' : 'Re-max this week instead'}</button>`
     : '';
+  const session = b.log[ui.week][ui.open];
   return `<header class="top">
       <h1 class="display">Block ${n}</h1>
       <p class="top-meta">Started ${shortDate(b.started)}</p>
     </header>
     ${notice(b)}
     ${waveNav(b)}
+    <p class="week-line"><span class="week-count">Week ${ui.week + 1} of ${BLOCK_WEEKS}</span> <span class="week-title">${weekName(b, ui.week)}</span></p>
+    ${dayTabs(b, next)}
+    ${dayPanel(b, session, ui.open, next?.week === ui.week && next.index === ui.open)}
     <section class="week-head">
-      <p class="week-count">Week ${ui.week + 1} of ${BLOCK_WEEKS}</p>
-      <h2 class="week-title">${weekName(b, ui.week)}</h2>
+      <h2 class="week-about">About week ${ui.week + 1}</h2>
       <p class="week-note">${weekNote(b, ui.week)}</p>
       ${finish}
     </section>
-    <ol class="sessions">
-      ${b.log[ui.week].map((s, i) => sessionView(b, s, i, next?.week === ui.week && next.index === i)).join('')}
-    </ol>
     ${last ? `<div class="block-end">
       <button class="btn btn-wide" data-action="review" data-key="review">Finish block</button>
       <p class="hint">See how the block went and set your maxes for block ${n + 1}.</p>
@@ -351,7 +352,23 @@ function waveNav(b) {
 const liftOf = (session) => LIFTS.find((l) => l.id === session.lift);
 const isHeavyDay = (session) => session.kind === 'heavy' && ui.week !== FINISH_WEEK;
 
-function sessionView(b, session, i, isNext) {
+// The week's days as tabs, each with a light: white when done, a ring when started, a dash when skipped.
+function dayTabs(b, next) {
+  const days = b.log[ui.week];
+  return `<nav class="days" aria-label="Days" style="--n:${days.length}">${days.map((s, i) => {
+    const status = sessionStatus(s);
+    const isNext = next?.week === ui.week && next.index === i;
+    const said = { done: 'done', skipped: 'skipped', started: 'started', todo: isNext ? 'up next' : 'not started' }[status];
+    return `<button class="day-tab" data-action="session" data-index="${i}" data-key="day-${i}" data-status="${status}"${isNext ? ' data-next' : ''}
+        aria-pressed="${ui.open === i}" aria-label="${s.day}, ${liftOf(s).name}, ${said}">
+      <span class="day-tab-day">${s.day.slice(0, 3)}</span>
+      <span class="day-tab-lift">${liftOf(s).short}</span>
+      <span class="day-tab-light" aria-hidden="true"></span>
+    </button>`;
+  }).join('')}</nav>`;
+}
+
+function dayPanel(b, session, i, isNext) {
   const status = sessionStatus(session);
   const logged = session.reps.filter((r) => r !== null).length;
   const what = session.kind === 'max' ? 'attempt' : 'set';
@@ -361,16 +378,15 @@ function sessionView(b, session, i, isNext) {
     started: `${logged} of ${plural(session.reps.length, what)}`,
     todo: isNext ? 'Up next' : '',
   }[status];
-  const open = ui.open === i;
   const tag = session.kind === 'max' ? ', re-max' : isHeavyDay(session) ? ', heavy day' : '';
-  return `<li class="session" data-status="${status}"${isNext ? ' data-next' : ''}>
-    <button class="session-head" data-action="session" data-index="${i}" data-key="session-${i}" aria-expanded="${open}">
+  return `<section class="day-panel" data-status="${status}" aria-label="${session.day}">
+    <div class="day-head">
       <span class="session-day">${session.day}${tag}</span>
-      <span class="session-lift">${liftOf(session).name}</span>
+      <h2 class="session-lift">${liftOf(session).name}</h2>
       <span class="session-state">${label}</span>
-    </button>
-    ${open ? sessionBody(b, session, i) : ''}
-  </li>`;
+    </div>
+    ${sessionBody(b, session, i)}
+  </section>`;
 }
 
 const skipButton = (session, i) => (sessionStatus(session) === 'done' ? ''
@@ -1287,15 +1303,14 @@ const ACTIONS = {
     render();
   },
   session(el) {
-    const i = Number(el.dataset.index);
-    ui.open = ui.open === i ? null : i;
+    ui.open = Number(el.dataset.index);
     render();
   },
+  // Stays on the skipped day so the skip can be undone and its accessories still logged.
   skip(el) {
     sessionAt(Number(el.dataset.index)).skipped = true;
     save();
     rest.stop();
-    ui.open = defaultOpen(block(), ui.week);
     render();
   },
   unskip(el) {

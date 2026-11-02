@@ -1,0 +1,15 @@
+{
+  "name": "Powerlifting Wave",
+  "short_name": "Wave",
+  "description": "4-week squat, bench and deadlift wave tracker",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#14202e",
+  "theme_color": "#14202e",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

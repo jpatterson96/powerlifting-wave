@@ -80,6 +80,37 @@ export function maxChart(weeks, width, height = 190) {
   </svg>`;
 }
 
+// One value per session or day as a line with dots, labelled with its first and last dates. Used for an
+// accessory's best set and for body weight.
+export function progressChart(points, width, height = 170) {
+  const f = frame(points, width, height);
+  const values = points.map((p) => p.value);
+  const lo = Math.min(...values);
+  const hi = Math.max(...values);
+  const step = niceStep(Math.max(hi - lo, hi * 0.04, 4) * 1.4, 4);
+  const min = Math.max(0, Math.floor((lo - step / 2) / step) * step);
+  const max = Math.ceil((hi + step / 2) / step) * step;
+  const y = (v) => PAD.top + (1 - (v - min) / (max - min)) * (f.bottom - PAD.top);
+  const ticks = [];
+  for (let t = min; t <= max + 1e-9; t += step) ticks.push(t);
+  const path = points.map((p, i) => `${i ? 'L' : 'M'}${f.x(i)},${y(p.value)}`).join('');
+  const dots = points.map((p, i) => `<circle class="chart-dot is-series-1" cx="${f.x(i)}" cy="${y(p.value)}" r="4"/>`).join('');
+  const ends = [0, points.length - 1].filter((i, k, a) => a.indexOf(i) === k).map((i) => {
+    const anchor = points.length > 1 && i === points.length - 1 ? 'end' : 'start';
+    const x = anchor === 'end' ? f.edge(i + 1) : f.edge(i);
+    return `<text class="chart-label" x="${x}" y="${f.bottom + 19}" text-anchor="${anchor}">${points[i].label}</text>`;
+  }).join('');
+  return `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true">
+    ${yAxis(ticks, y, f, num)}
+    <line class="chart-axis" x1="${PAD.left}" x2="${width - PAD.right}" y1="${f.bottom}" y2="${f.bottom}"/>
+    ${ends}
+    <path class="chart-line" d="${path}"/>
+    ${dots}
+    <text class="chart-end" x="${width - PAD.right + 6}" y="${y(values[values.length - 1]) + 5}">${num(values[values.length - 1])}</text>
+    ${overlay(f, points.length)}
+  </svg>`;
+}
+
 // One column per week of everything lifted on that lift (weight × reps); empty weeks draw nothing.
 export function volumeChart(weeks, width, height = 160) {
   const f = frame(weeks, width, height);

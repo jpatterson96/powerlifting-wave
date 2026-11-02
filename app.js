@@ -1,13 +1,17 @@
 import {
   LIFTS, WEEKS, BLOCK_WEEKS, WAVE_TWO, FIRST_TEST, FINISH_WEEK, ATTEMPTS, ATTEMPT_NAMES, REMAX_RAMP, BUMPS, isTestSet,
-  prescription, ROUNDING, BAR, tidy, roundTo, workingMax, targetWeight, estimateMax, weekMax, attemptBase, attemptWeight, setWeight,
+  prescription, ROUNDING, REST_MODES, BAR, tidy, roundTo, workingMax, targetWeight, estimateMax, weekMax, attemptBase, attemptWeight, setWeight,
   singleWeight, restSeconds, platesPerSide, warmups, emptyState, newBlock, finishFor, setFinish, sessionStatus,
   weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak, restartBlock, evaluateLift, liftHistory,
   convertState, upgrade,
 } from './logic.js';
+import {
+  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, newExercise, dayExtras, entryOf, ensureEntry, exerciseHistory, lastTime,
+  defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras,
+} from './extras.js';
 import * as sync from './sync.js';
 import * as rest from './rest.js';
-import { maxChart, volumeChart } from './charts.js';
+import { maxChart, volumeChart, progressChart } from './charts.js';
 
 const KEY = 'powerlifting-wave';
 const view = document.getElementById('view');
@@ -17,13 +21,21 @@ const repsSheet = document.getElementById('reps-sheet');
 const repGrid = document.getElementById('rep-grid');
 const weightSheet = document.getElementById('weight-sheet');
 const weightInput = document.getElementById('weight-input');
+const repsWeight = document.getElementById('reps-weight');
+const pickSheet = document.getElementById('pick-sheet');
+const exerciseSheet = document.getElementById('exercise-sheet');
+const exerciseForm = document.getElementById('exercise-form');
 const restoreInput = document.getElementById('restore-input');
 
 let state = load();
 // `open` is the index of the expanded day in the shown week; undefined means "pick the next day to train".
-const ui = { tab: 'train', reviewing: false, week: null, open: undefined, sheet: null, lift: 'squat' };
-// The week-by-week numbers behind the History charts, for their tooltips.
-let chartWeeks = [];
+// `history` is the History tab's section; `exercise` an accessory opened there; `editing` the exercise in the editor.
+const ui = {
+  tab: 'train', reviewing: false, week: null, open: undefined, sheet: null, lift: 'squat',
+  history: 'lifts', exercise: null, variant: null, editing: null,
+};
+// The numbers behind each History chart, by its data-chart name, for the tooltips.
+const chartData = {};
 
 // Colour, height and thickness for one side of the bar, heaviest plates biggest.
 const PLATE_STYLE = {
@@ -31,9 +43,15 @@ const PLATE_STYLE = {
   kg: { 25: ['red', 56, 12], 20: ['blue', 56, 11], 15: ['yellow', 50, 10], 10: ['green', 44, 9], 5: ['white', 34, 8], 2.5: ['black', 28, 7], 1.25: ['chrome', 22, 5] },
 };
 
+// Brings saved data of any version up to date; accessory data that doesn't check out is dropped, not the log.
+function upgradeAll(data) {
+  const s = upgrade(data);
+  return s && cleanExtras(s);
+}
+
 function load() {
   try {
-    const saved = upgrade(JSON.parse(localStorage.getItem(KEY)));
+    const saved = upgradeAll(JSON.parse(localStorage.getItem(KEY)));
     if (saved) return saved;
   } catch {
     // Unreadable storage falls through to a fresh start.
@@ -63,6 +81,17 @@ const block = () => state.blocks[state.blocks.length - 1];
 // Two decimals covers 288.75-style maxes and hides the long tails left by unit conversion.
 const fmt = (n) => String(Math.round(n * 100) / 100);
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+// Exercise and variant names are typed by the lifter, so they're escaped wherever they go into markup.
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtLoad = (w) => (w === 0 ? 'BW' : fmt(w));
+const exerciseById = (id) => state.exercises.find((e) => e.id === id);
+
+// "50 × 12, 12, 10" when the weight holds, "50 × 12, 55 × 10" when it changes.
+function setsText(sets) {
+  const parts = [];
+  sets.forEach((s, i) => parts.push(i && s.weight === sets[i - 1].weight ? String(s.reps) : `${fmtLoad(s.weight)} × ${s.reps}`));
+  return parts.join(', ');
+}
 const restText = (s) => (s % 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s / 60} min`);
 
 function todayISO() {
@@ -132,8 +161,8 @@ function waveMark() {
 function segmented(name, options, current) {
   return `<div class="seg">${options.map((o) => `
     <label class="seg-option">
-      <input type="radio" name="${name}" value="${o.value}"${o.value === current ? ' checked' : ''}>
-      <span>${o.label}</span>
+      <input type="radio" name="${name}" value="${esc(o.value)}"${o.value === current ? ' checked' : ''}>
+      <span>${esc(o.label)}</span>
     </label>`).join('')}
   </div>`;
 }
@@ -214,9 +243,10 @@ function syncSection() {
   return `<section class="setting">
     <h2 class="setting-title">Save to GitHub</h2>
     ${syncStatusLine()}
-    <p class="hint">GitHub keeps every saved version, so an older log can always be recovered.</p>
+    <p class="hint">GitHub keeps every saved version, so an older log can always be recovered. Load from GitHub brings in changes made somewhere else, replacing this phone's log.</p>
     <div class="button-row">
       <button class="btn" data-action="sync-now">Save now</button>
+      <button class="btn-quiet" data-action="sync-load">Load from GitHub</button>
       <button class="btn-quiet" data-action="sync-disconnect">Disconnect</button>
     </div>
   </section>`;
@@ -349,8 +379,9 @@ const skipButton = (session, i) => (sessionStatus(session) === 'done' ? ''
 function sessionBody(b, session, i) {
   if (session.skipped) {
     return `<div class="session-body">
-      <p class="hint">You skipped this day. It doesn't count toward your next max.</p>
+      <p class="hint">You skipped this day's ${liftOf(session).name.toLowerCase()}. It doesn't count toward your next max.</p>
       <button class="btn-quiet" data-action="unskip" data-index="${i}" data-key="unskip-${i}">Undo skip</button>
+      ${extrasSection(session, i)}
     </div>`;
   }
   if (session.kind === 'max') return remaxBody(b, session, i);
@@ -381,7 +412,78 @@ function sessionBody(b, session, i) {
       ${session.reps.map((r, s) => setLight(session, i, s, r)).join('')}
     </div>
     ${skipButton(session, i)}
+    ${extrasSection(session, i)}
   </div>`;
+}
+
+// Where a training day sits in the log, for finding the last time an accessory was done before it.
+const here = (index) => [state.blocks.length - 1, ui.week, index];
+
+function extraPlan(session, index, exercise) {
+  const entry = entryOf(session, exercise.id);
+  const variant = entry?.variant ?? defaultVariant(state, exercise);
+  const last = lastTime(state, exercise.id, variant, here(index));
+  return { entry, variant, last, plan: suggestion(exercise, last) };
+}
+
+// The weight and reps a set is prefilled with: the plan from last time, or else today's set before it
+// (the first time through, and for sets added past the plan).
+function extraTarget(exercise, entry, plan, set) {
+  if (set < exercise.sets && plan.weights[set] !== null) return { weight: plan.weights[set], reps: plan.reps[set] };
+  const prev = entry?.sets.slice(0, set).filter(Boolean).pop();
+  if (prev) return { ...prev };
+  return { weight: null, reps: set < exercise.sets ? plan.reps[set] : exercise.low };
+}
+
+function extrasSection(session, i) {
+  const list = dayExtras(state, session);
+  return `<section class="extras" aria-label="Accessories">
+    <h3 class="extras-title">Accessories</h3>
+    ${list.length ? `<ol class="extra-list">${list.map((e) => extraView(session, i, e)).join('')}</ol>`
+      : `<p class="hint">Nothing on ${session.day}s yet. Add the exercises you do after your ${liftOf(session).name.toLowerCase()}.</p>`}
+    <button class="btn-quiet" data-action="extra-add" data-index="${i}" data-key="extra-add-${i}">Add an exercise</button>
+  </section>`;
+}
+
+function extraView(session, i, e) {
+  const { entry, variant, last, plan } = extraPlan(session, i, e);
+  const ids = `data-index="${i}" data-exercise="${e.id}"`;
+  const name = `<span class="extra-name">${esc(e.name)}</span>`;
+  if (entry?.skipped) {
+    return `<li class="extra is-skipped">
+      <div class="extra-head">${name}<button class="btn-quiet" data-action="extra-unskip" ${ids} data-key="extra-unskip-${i}-${e.id}">Undo skip</button></div>
+    </li>`;
+  }
+  const count = Math.max(entry?.sets.length ?? 0, e.sets);
+  const logged = entry ? entry.sets.filter(Boolean).length : 0;
+  const lights = Array.from({ length: count }, (_, s) => {
+    const done = entry?.sets[s] ?? null;
+    const target = extraTarget(e, entry, plan, s);
+    const shown = done ?? target;
+    const cls = done ? (done.reps >= e.low ? 'set is-good' : 'set is-short') : 'set';
+    const label = done ? `Set ${s + 1}, ${done.reps} reps at ${fmtLoad(done.weight)}` : `Set ${s + 1}, ${shown.reps} reps${shown.weight === null ? '' : ` at ${fmtLoad(shown.weight)}`}, not logged`;
+    return `<span class="extra-set">
+      <button class="${cls}" data-action="extra-set" ${ids} data-set="${s}" data-key="extra-${i}-${e.id}-${s}" aria-label="${esc(e.name)}. ${label}">${shown.reps}</button>
+      <span class="extra-weight">${shown.weight === null ? '–' : fmtLoad(shown.weight)}</span>
+    </span>`;
+  }).join('');
+  const range = `${e.sets} × ${e.low}–${e.high}`;
+  const note = !last ? `${range}. First time: pick a weight you can lift ${e.low}–${e.high} times.`
+    : plan.up ? `${range}. Last time ${setsText(last.sets)}: every set at the top, so go up to ${fmtLoad(plan.weights[0])}.`
+      : `${range}. Last time ${setsText(last.sets)}: same weight, one more rep a set.`;
+  return `<li class="extra" data-status="${logged === count ? 'done' : logged ? 'started' : 'todo'}">
+    <div class="extra-head">
+      ${name}
+      ${e.variants.length > 1 ? `<button class="chip" data-action="extra-variant" ${ids} data-key="extra-variant-${i}-${e.id}" aria-label="${esc(e.name)} variant: ${esc(variant)}. Change">${esc(variant)}</button>`
+        : e.variants.length ? `<span class="chip is-static">${esc(variant)}</span>` : ''}
+    </div>
+    <p class="extra-note">${note}</p>
+    <div class="sets extra-sets" role="group" aria-label="${esc(e.name)} sets">${lights}</div>
+    <div class="extra-actions">
+      ${count < 20 ? `<button class="btn-quiet" data-action="extra-set-add" ${ids}>Add a set</button>` : ''}
+      ${logged ? '' : `<button class="btn-quiet" data-action="extra-skip" ${ids} data-key="extra-skip-${i}-${e.id}">Skip today</button>`}
+    </div>
+  </li>`;
 }
 
 // Re-max day: warm-ups built toward the opener, then three attempts judged like a meet.
@@ -411,6 +513,7 @@ function remaxBody(b, session, i) {
     <p class="hint">Pick the third from how the second moved: fast, go for ${fmt(weights[2])}; slow, take about ${fmt(slow)}; a grind, stop there and mark the third a pass.</p>
     ${best !== null ? `<p class="remax-best">Best good lift <strong>${fmt(best)}</strong> ${state.unit}</p>` : ''}
     ${skipButton(session, i)}
+    ${extrasSection(session, i)}
   </div>`;
 }
 
@@ -515,11 +618,112 @@ function chartWidth() {
   return Math.floor(view.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
 }
 
+const HISTORY_VIEWS = [{ value: 'lifts', label: 'Lifts' }, { value: 'extras', label: 'Accessories' }, { value: 'body', label: 'Body' }];
+
 function historyView() {
+  const section = ui.history === 'extras' ? extrasHistory() : ui.history === 'body' ? bodyHistory() : liftsHistory();
+  return `<header class="top"><h1 class="display">History</h1></header>
+    <fieldset class="history-pick" aria-label="Show">${segmented('historyView', HISTORY_VIEWS, ui.history)}</fieldset>
+    ${section}`;
+}
+
+function chartFigure(kind, label, svg) {
+  return `<figure class="chart" data-chart="${kind}" data-key="chart-${kind}" tabindex="0" aria-label="${label}. Use the arrow keys to read each point.">
+    ${svg}
+    <div class="chart-tip" hidden></div>
+  </figure>`;
+}
+
+function extrasHistory() {
+  if (ui.exercise && exerciseById(ui.exercise)) return exerciseDetail(exerciseById(ui.exercise));
+  if (!state.exercises.length) {
+    return `<p class="chart-empty">No accessories yet. Add them from a training day, or in Settings.</p>`;
+  }
+  const rows = state.exercises.map((e) => {
+    const h = exerciseHistory(state, e.id);
+    const last = h[h.length - 1];
+    const best = records(h).best;
+    const meta = last
+      ? `Last ${last.date ? shortDate(last.date) : 'logged'}: ${setsText(last.sets)}${best ? `. Est. max ${fmt(Math.round(best.value))}` : ''}`
+      : 'Not logged yet';
+    return `<li><button class="index-row" data-action="exercise-open" data-exercise="${e.id}">
+      <span class="index-name">${esc(e.name)}</span><span class="index-meta">${meta}</span>
+    </button></li>`;
+  }).join('');
+  return `<ul class="index-list">${rows}</ul>`;
+}
+
+function exerciseDetail(e) {
+  const all = exerciseHistory(state, e.id);
+  const used = [...new Set(all.map((h) => h.variant))];
+  if (!used.includes(ui.variant)) ui.variant = used[used.length - 1] ?? null;
+  const history = all.filter((h) => h.variant === ui.variant);
+  const back = '<button class="btn-quiet back" data-action="exercise-close">All accessories</button>';
+  const title = `<h2 class="chart-title detail-title">${esc(e.name)}</h2>`;
+  if (!history.length) return `${back}${title}<p class="chart-empty">Not logged yet. It fills in after the first session.</p>`;
+  const variants = used.length > 1
+    ? `<fieldset class="variant-pick" aria-label="Variant">${segmented('variant', used.map((v) => ({ value: v ?? '', label: v ?? 'Other' })), ui.variant ?? '')}</fieldset>` : '';
+  const { heaviest, best, volume } = records(history);
+  const points = history.map((h, i) => {
+    const top = sessionBest(h.sets);
+    const date = h.date ? shortDate(h.date) : `Session ${i + 1}`;
+    return { value: Math.round(top.value * 10) / 10, label: date, title: date, note: top.kind === 'reps' ? 'reps, best set' : `est. max, from ${setsText(h.sets)}` };
+  });
+  chartData.progress = points;
+  const reps = points.every((p, i) => sessionBest(history[i].sets).kind === 'reps');
+  const recent = history.slice(-8).reverse().map((h) => `<tr>
+      <th scope="row"><span class="h-date">${h.date ? shortDate(h.date) : '–'}</span></th>
+      <td class="sets-cell">${setsText(h.sets)}</td>
+    </tr>`).join('');
+  return `${back}${title}${variants}
+    <dl class="stats">
+      <div><dt>Heaviest set</dt><dd>${fmtLoad(heaviest.weight)} × ${heaviest.reps}</dd></div>
+      ${best ? `<div><dt>Estimated max</dt><dd>${fmt(Math.round(best.value))}</dd></div>` : ''}
+      <div><dt>Best session</dt><dd>${Math.round(volume).toLocaleString()}</dd></div>
+    </dl>
+    <p class="hint">Best session is weight × reps added up, in ${state.unit}.</p>
+    <section class="chart-block">
+      <h3 class="chart-title">${reps ? 'Most reps in a set' : 'Estimated max, by session'}</h3>
+      ${points.length > 1 ? chartFigure('progress', `${esc(e.name)} by session`, progressChart(points, chartWidth()))
+        : '<p class="chart-empty">Log it again to see a chart.</p>'}
+    </section>
+    <h3 class="chart-title history-title">Recent sessions</h3>
+    <table class="history weeks"><tbody>${recent}</tbody></table>`;
+}
+
+function bodyHistory() {
+  const entries = state.bodyweight;
+  const latest = entries[entries.length - 1];
+  const points = entries.map((e) => ({ value: e.weight, label: shortDate(e.date), title: shortDate(e.date), note: state.unit }));
+  chartData.body = points;
+  const recent = entries.slice(-10).reverse().map((e) => `<tr>
+      <th scope="row"><span class="h-date">${shortDate(e.date)}</span></th><td>${fmt(e.weight)} ${state.unit}</td>
+    </tr>`).join('');
+  return `<form class="body-form" id="bodyweight-form" novalidate>
+      <label class="field">
+        <span class="field-label">Today's body weight</span>
+        <span class="field-row">
+          <input class="num-input" name="weight" type="number" inputmode="decimal" step="any" min="0" placeholder="${latest ? fmt(latest.weight) : ''}">
+          <span class="field-unit">${state.unit}</span>
+        </span>
+      </label>
+      <button class="btn" type="submit">Log</button>
+    </form>
+    ${latest ? `<p class="hint">Last logged ${fmt(latest.weight)} ${state.unit} on ${shortDate(latest.date)}. Logging again today replaces today's number.</p>` : ''}
+    <section class="chart-block">
+      <h2 class="chart-title">Body weight</h2>
+      ${points.length > 1 ? chartFigure('body', 'Body weight by day', progressChart(points, chartWidth()))
+        : `<p class="chart-empty">${points.length ? 'Log it on another day to see a chart.' : 'Log your weight to start the chart.'}</p>`}
+    </section>
+    ${recent ? `<table class="history weeks"><tbody>${recent}</tbody></table>` : ''}`;
+}
+
+function liftsHistory() {
   const lift = LIFTS.find((l) => l.id === ui.lift);
   const name = lift.short.toLowerCase();
   const weeks = liftHistory(state, lift.id);
-  chartWeeks = weeks;
+  chartData.max = weeks;
+  chartData.volume = weeks;
   const width = chartWidth();
   const tested = weeks.filter((w) => w.tests.length);
   const lifted = weeks.filter((w) => w.volume > 0);
@@ -543,8 +747,7 @@ function historyView() {
       <td>${Math.round(w.volume).toLocaleString()}</td>
       <td>${w.tests.map((t) => fmt(Math.round(t.value))).join(', ') || '–'}</td>
     </tr>`).reverse().join('');
-  return `<header class="top"><h1 class="display">History</h1></header>
-    <fieldset class="lift-pick" aria-label="Lift">${segmented('lift', LIFTS.map((l) => ({ value: l.id, label: l.short })), lift.id)}</fieldset>
+  return `<fieldset class="lift-pick" aria-label="Lift">${segmented('lift', LIFTS.map((l) => ({ value: l.id, label: l.short })), lift.id)}</fieldset>
     <section class="chart-block">
       <h2 class="chart-title">${lift.short} max</h2>
       <p class="chart-legend"><span><i class="key-line"></i>Max you trained from</span><span><i class="key-dot"></i>Tested</span></p>
@@ -605,6 +808,7 @@ function settingsView() {
       ${segmented('rest', restOptions, state.rest)}
       <p class="hint">Starts when you log a set, timed for the lift and the weight: longer for heavier sets and deadlifts. The screen stays on while it runs, and the bar turns white when rest is over. Beeps only play with the app open and the ring switch off silent.</p>
     </fieldset>
+    ${exercisesSection()}
     <section class="setting">
       <h2 class="setting-title">Current maxes</h2>
       <p class="hint">For fixing a typo. Changes apply to block ${state.blocks.length} right away.</p>
@@ -633,6 +837,32 @@ function settingsView() {
     </section>`;
 }
 
+const shortDay = (d) => d.slice(0, 3);
+
+function exercisesSection() {
+  const last = state.exercises.length - 1;
+  const rows = state.exercises.map((e, i) => {
+    const days = e.days.length ? e.days.map(shortDay).join(', ') : 'No set days';
+    const variants = e.variants.length ? `. ${e.variants.map(esc).join(' or ')}` : '';
+    return `<li class="exercise-row">
+      <button class="index-row" data-action="exercise-edit" data-exercise="${e.id}" data-key="exercise-edit-${e.id}">
+        <span class="index-name">${esc(e.name)}</span>
+        <span class="index-meta">${e.sets} × ${e.low}–${e.high}, ${days}${variants}</span>
+      </button>
+      <button class="icon-btn" data-action="exercise-move" data-exercise="${e.id}" data-by="-1" data-key="exercise-up-${e.id}"
+        aria-label="Move ${esc(e.name)} up"${i === 0 ? ' disabled' : ''}>↑</button>
+      <button class="icon-btn" data-action="exercise-move" data-exercise="${e.id}" data-by="1" data-key="exercise-down-${e.id}"
+        aria-label="Move ${esc(e.name)} down"${i === last ? ' disabled' : ''}>↓</button>
+    </li>`;
+  }).join('');
+  return `<section class="setting">
+    <h2 class="setting-title">Accessories</h2>
+    <p class="hint">Your exercises, the days they show up on, and their rep ranges. They're listed under each day's main lift in this order.</p>
+    ${rows ? `<ol class="index-list">${rows}</ol>` : ''}
+    <button class="btn" data-action="exercise-new">Add an exercise</button>
+  </section>`;
+}
+
 // ---------- Chart taps ----------
 
 function tipContent(kind, w) {
@@ -642,6 +872,7 @@ function tipContent(kind, w) {
     r.append(el('i', key), el('strong', '', value), el('span', '', label));
     return r;
   };
+  if (kind === 'progress' || kind === 'body') return [el('div', 'tip-title', w.title), row('key-line', fmt(w.value), w.note)];
   const title = el('div', 'tip-title', `Block ${w.block + 1}, week ${w.week + 1}`);
   if (kind === 'volume') return [title, row('key-line', Math.round(w.volume).toLocaleString(), `${state.unit}, ${plural(w.reps, 'rep')}`)];
   return [title, row('key-line', fmt(w.max), 'max'),
@@ -656,7 +887,7 @@ function showTip(figure, index) {
   cross.setAttribute('x2', x);
   cross.setAttribute('visibility', 'visible');
   const tip = figure.querySelector('.chart-tip');
-  tip.replaceChildren(...tipContent(figure.dataset.chart, chartWeeks[index]));
+  tip.replaceChildren(...tipContent(figure.dataset.chart, chartData[figure.dataset.chart][index]));
   tip.hidden = false;
   // Beside the crosshair, on whichever side has room.
   const left = x > figure.clientWidth / 2 ? x - tip.offsetWidth - 12 : x + 12;
@@ -680,9 +911,11 @@ function chartPointer(e) {
   showTip(figure, Math.min(Number(hit.dataset.n) - 1, Math.max(0, index)));
 }
 
-// The latest week with anything logged, so keyboard reading starts where the lifter is.
-function latestIndex() {
-  for (let i = chartWeeks.length - 1; i >= 0; i--) if (chartWeeks[i].volume || chartWeeks[i].tests.length) return i;
+// The latest point with anything logged, so keyboard reading starts where the lifter is.
+function latestIndex(kind) {
+  const data = chartData[kind];
+  if (kind !== 'max' && kind !== 'volume') return data.length - 1;
+  for (let i = data.length - 1; i >= 0; i--) if (data[i].volume || data[i].tests.length) return i;
   return 0;
 }
 
@@ -705,6 +938,7 @@ function logSet(session, set, reps) {
     const lifted = setWeight(block(), session, ui.week, set, state);
     if (session.kind === 'max') session.weights[set] ??= lifted;
     else session.weight ??= lifted;
+    session.date ??= todayISO();
     block().lastTrained = todayISO();
   }
   session.reps[set] = reps;
@@ -734,6 +968,7 @@ function openReps(index, set) {
   const session = sessionAt(index);
   const current = session.reps[set];
   ui.sheet = { index, set };
+  document.getElementById('reps-weight-field').hidden = true;
   repGrid.classList.toggle('is-judging', session.kind === 'max');
   if (session.kind === 'max') {
     const weight = setWeight(block(), session, ui.week, set, state);
@@ -754,6 +989,85 @@ function openReps(index, set) {
         aria-pressed="${n === current}">${n}</button>`).join('');
   }
   repsSheet.showModal();
+}
+
+// An accessory set: the weight (0 for body weight) and a tap on the reps done.
+function openExtra(index, id, set) {
+  const session = sessionAt(index);
+  const e = exerciseById(id);
+  const { entry, variant, plan } = extraPlan(session, index, e);
+  const current = entry?.sets[set] ?? null;
+  const target = extraTarget(e, entry, plan, set);
+  ui.sheet = { index, set, exercise: id };
+  document.getElementById('reps-title').textContent = `${e.name}${variant ? `, ${variant}` : ''}, set ${set + 1}`;
+  document.getElementById('reps-note').textContent = `${e.low}–${e.high} reps. Set the weight (0 for body weight), then tap the reps you did.`;
+  document.getElementById('reps-weight-field').hidden = false;
+  document.getElementById('reps-weight-unit').textContent = state.unit;
+  const weight = current?.weight ?? target.weight ?? entry?.sets.filter(Boolean).pop()?.weight;
+  repsWeight.value = weight === undefined || weight === null ? '' : fmt(weight);
+  repGrid.classList.remove('is-judging');
+  repGrid.innerHTML = Array.from({ length: e.high + 6 }, (_, n) => `
+    <button class="rep${n === target.reps ? ' is-target' : ''}" data-action="reps-pick" data-reps="${n}"
+      aria-pressed="${n === current?.reps}">${n}</button>`).join('');
+  repsSheet.showModal();
+}
+
+function logExtra(index, exercise, set, value) {
+  const session = sessionAt(index);
+  const variant = entryOf(session, exercise.id)?.variant ?? defaultVariant(state, exercise);
+  const entry = ensureEntry(session, exercise, variant);
+  const fresh = entry.sets[set] === null && value !== null;
+  entry.sets[set] = value;
+  // Clearing an added set at the end removes it again.
+  if (value === null && set >= exercise.sets && set === entry.sets.length - 1) entry.sets.pop();
+  if (value) {
+    session.date ??= todayISO();
+    block().lastTrained = todayISO();
+  }
+  save();
+  if (!fresh) return;
+  const next = entry.sets.findIndex((s) => s === null);
+  if (next === -1) return rest.stop();
+  const { plan } = extraPlan(session, index, exercise);
+  const { weight } = extraTarget(exercise, entry, plan, next);
+  rest.start(exercise.rest, `Next: ${exercise.name}, set ${next + 1} of ${entry.sets.length}${weight === null ? '' : `, ${fmtLoad(weight)} ${state.unit}`}`);
+}
+
+function openPick(index) {
+  const session = sessionAt(index);
+  const shown = dayExtras(state, session);
+  const others = state.exercises.filter((e) => !shown.includes(e));
+  ui.sheet = { index };
+  if (!others.length) return openEditor(null, index);
+  document.getElementById('pick-note').textContent = `Adds it to this ${session.day} only. To have it every week, set its days in Settings.`;
+  document.getElementById('pick-list').innerHTML = others.map((e) => `
+    <button class="index-row" data-action="extra-pick" data-exercise="${e.id}">
+      <span class="index-name">${esc(e.name)}</span><span class="index-meta">${e.sets} × ${e.low}–${e.high}</span>
+    </button>`).join('');
+  pickSheet.showModal();
+}
+
+// `index` is the training day it was opened from, so a new exercise lands on that day.
+function openEditor(id, index = null) {
+  const e = id ? exerciseById(id) : null;
+  const day = index === null ? null : sessionAt(index).day;
+  ui.editing = { id, index };
+  const f = exerciseForm.elements;
+  document.getElementById('exercise-title').textContent = e ? 'Edit exercise' : 'New exercise';
+  document.getElementById('exercise-unit').textContent = state.unit;
+  document.getElementById('exercise-delete').hidden = !e;
+  f.name.value = e?.name ?? '';
+  f.variants.value = e?.variants.join(', ') ?? '';
+  f.sets.value = e?.sets ?? EXTRA_DEFAULTS.sets;
+  f.low.value = e?.low ?? EXTRA_DEFAULTS.low;
+  f.high.value = e?.high ?? EXTRA_DEFAULTS.high;
+  f.step.value = fmt(e?.step ?? EXTRA_STEP[state.unit]);
+  f.restSeconds.value = e?.rest ?? EXTRA_DEFAULTS.rest;
+  const days = e?.days ?? (day ? [day] : []);
+  document.getElementById('exercise-days').innerHTML = WEEKDAYS.map((d) => `
+    <label class="day-box"><input type="checkbox" name="days" value="${d}"${days.includes(d) ? ' checked' : ''}><span>${shortDay(d)}</span></label>`).join('');
+  pickSheet.close();
+  exerciseSheet.showModal();
 }
 
 function openWeight(index, attempt) {
@@ -818,7 +1132,7 @@ async function backup() {
 async function restore(file) {
   let data;
   try {
-    data = upgrade(JSON.parse(await file.text()));
+    data = upgradeAll(JSON.parse(await file.text()));
   } catch {
     data = null;
   }
@@ -889,7 +1203,7 @@ const FORMS = {
       button.textContent = 'Connect';
       return toast(result.message);
     }
-    const saved = upgrade(result.remote?.state);
+    const saved = upgradeAll(result.remote?.state);
     const useSaved = saved && saved.blocks.length > 0 && (state.blocks.length === 0 || confirm(
       `GitHub has a saved log with ${plural(saved.blocks.length, 'block')}. Replace this phone's log with it?\n\nCancel keeps this phone's log and saves it to GitHub instead.`));
     if (useSaved) {
@@ -912,6 +1226,42 @@ const FORMS = {
       form.closest('.restore-github')?.replaceWith(Object.assign(document.createElement('div'), { innerHTML: syncStatusLine() }).firstElementChild);
     }
     toast('Connected to GitHub.');
+  },
+  'exercise-form'(form) {
+    const f = form.elements;
+    const name = f.name.value.trim();
+    const variants = [...new Set(f.variants.value.split(',').map((v) => v.trim()).filter(Boolean))];
+    const [sets, low, high, rest] = ['sets', 'low', 'high', 'restSeconds'].map((k) => Number(f[k].value));
+    const step = tidy(parseFloat(f.step.value));
+    const days = [...form.querySelectorAll('input[name="days"]:checked')].map((c) => c.value);
+    if (!name || name.length > 60) return toast('Give the exercise a name.');
+    if (variants.length > 8 || variants.some((v) => v.length > 40)) return toast('Use up to 8 short variant names.');
+    if (!Number.isInteger(sets) || sets < 1 || sets > 10) return toast('Sets must be 1 to 10.');
+    if (!Number.isInteger(low) || !Number.isInteger(high) || low < 1 || high > 50 || low > high) return toast('Reps go from a lower to a higher number, up to 50.');
+    if (!(step > 0) || step > 100) return toast(`Set a weight jump above 0, like ${EXTRA_STEP[state.unit]} ${state.unit}.`);
+    if (!Number.isInteger(rest) || rest < 15 || rest > 900) return toast('Rest must be 15 to 900 seconds.');
+    const fields = { name, variants, sets, low, high, step, rest, days };
+    const { id, index } = ui.editing;
+    if (id) {
+      Object.assign(exerciseById(id), fields);
+    } else {
+      const e = newExercise(fields);
+      state.exercises.push(e);
+      // Opened from a training day that isn't one of its days: it still shows up on that day.
+      if (index !== null && !days.includes(sessionAt(index).day)) ensureEntry(sessionAt(index), e, defaultVariant(state, e));
+    }
+    save();
+    exerciseSheet.close();
+    render();
+    toast(id ? 'Exercise saved.' : `${name} added.`);
+  },
+  'bodyweight-form'(form) {
+    const weight = tidy(parseFloat(form.elements.weight.value));
+    if (!(weight > 0)) return toast('Enter your body weight.');
+    logBodyweight(state, todayISO(), weight);
+    save();
+    render();
+    toast('Body weight logged.');
   },
   'max-form'(form) {
     const max = readMaxes(form, block().max);
@@ -970,6 +1320,14 @@ const ACTIONS = {
   },
   'reps-pick'(el) {
     rest.prime();
+    if (ui.sheet.exercise) {
+      const weight = tidy(parseFloat(repsWeight.value));
+      if (repsWeight.value.trim() === '' || !(weight >= 0)) return toast('Enter the weight first. Use 0 for body weight.');
+      logExtra(ui.sheet.index, exerciseById(ui.sheet.exercise), ui.sheet.set, { weight, reps: Number(el.dataset.reps) });
+      repsSheet.close();
+      render();
+      return;
+    }
     const session = sessionAt(ui.sheet.index);
     logSet(session, ui.sheet.set, Number(el.dataset.reps));
     repsSheet.close();
@@ -977,7 +1335,8 @@ const ACTIONS = {
     if (isTestSet(session, ui.week, ui.sheet.set)) toast(testNews(session));
   },
   'reps-clear'() {
-    logSet(sessionAt(ui.sheet.index), ui.sheet.set, null);
+    if (ui.sheet.exercise) logExtra(ui.sheet.index, exerciseById(ui.sheet.exercise), ui.sheet.set, null);
+    else logSet(sessionAt(ui.sheet.index), ui.sheet.set, null);
     repsSheet.close();
     render();
   },
@@ -995,6 +1354,92 @@ const ACTIONS = {
   },
   'weight-reset'() {
     saveWeight(null);
+  },
+  // One tap logs an accessory set as planned once its weight is known; otherwise it asks.
+  'extra-set'(el) {
+    rest.prime();
+    const index = Number(el.dataset.index);
+    const set = Number(el.dataset.set);
+    const e = exerciseById(el.dataset.exercise);
+    const { entry, plan } = extraPlan(sessionAt(index), index, e);
+    const target = extraTarget(e, entry, plan, set);
+    if (!entry?.sets[set] && target.weight !== null) {
+      logExtra(index, e, set, { weight: target.weight, reps: target.reps });
+      render();
+    } else {
+      openExtra(index, e.id, set);
+    }
+  },
+  'extra-set-add'(el) {
+    const session = sessionAt(Number(el.dataset.index));
+    const e = exerciseById(el.dataset.exercise);
+    const entry = ensureEntry(session, e, entryOf(session, e.id)?.variant ?? defaultVariant(state, e));
+    entry.sets.push(null);
+    save();
+    render();
+  },
+  'extra-skip'(el) {
+    const session = sessionAt(Number(el.dataset.index));
+    const e = exerciseById(el.dataset.exercise);
+    ensureEntry(session, e, defaultVariant(state, e)).skipped = true;
+    save();
+    render();
+  },
+  'extra-unskip'(el) {
+    entryOf(sessionAt(Number(el.dataset.index)), el.dataset.exercise).skipped = false;
+    save();
+    render();
+  },
+  'extra-variant'(el) {
+    const session = sessionAt(Number(el.dataset.index));
+    const e = exerciseById(el.dataset.exercise);
+    const current = entryOf(session, e.id)?.variant ?? defaultVariant(state, e);
+    const entry = ensureEntry(session, e, current);
+    entry.variant = e.variants[(e.variants.indexOf(current) + 1) % e.variants.length];
+    save();
+    render();
+  },
+  'extra-add'(el) {
+    openPick(Number(el.dataset.index));
+  },
+  'extra-pick'(el) {
+    const session = sessionAt(ui.sheet.index);
+    const e = exerciseById(el.dataset.exercise);
+    ensureEntry(session, e, defaultVariant(state, e));
+    save();
+    pickSheet.close();
+    render();
+  },
+  'exercise-new'() {
+    openEditor(null, pickSheet.open ? ui.sheet.index : null);
+  },
+  'exercise-edit'(el) {
+    openEditor(el.dataset.exercise);
+  },
+  'exercise-move'(el) {
+    const i = state.exercises.findIndex((e) => e.id === el.dataset.exercise);
+    const j = i + Number(el.dataset.by);
+    if (j < 0 || j >= state.exercises.length) return;
+    [state.exercises[i], state.exercises[j]] = [state.exercises[j], state.exercises[i]];
+    save();
+    render();
+  },
+  'exercise-delete'() {
+    const e = exerciseById(ui.editing.id);
+    if (!confirm(`Delete ${e.name}? It comes off your days and out of History. Sets already logged stay in your saved log.`)) return;
+    state.exercises = state.exercises.filter((x) => x !== e);
+    save();
+    exerciseSheet.close();
+    render();
+  },
+  'exercise-open'(el) {
+    Object.assign(ui, { exercise: el.dataset.exercise, variant: null });
+    render();
+    scrollTop();
+  },
+  'exercise-close'() {
+    ui.exercise = null;
+    render();
   },
   'switch-finish'() {
     const b = block();
@@ -1052,6 +1497,22 @@ const ACTIONS = {
   'sync-now'() {
     sync.saveNow();
   },
+  async 'sync-load'() {
+    const result = await sync.fetchSaved();
+    if (!result.ok) return toast(result.message);
+    const saved = upgradeAll(result.state);
+    if (!saved || !saved.blocks.length) return toast("The copy on GitHub isn't a log this app can read.");
+    const what = `${plural(saved.blocks.length, 'block')} and ${plural(saved.exercises.length, 'accessory exercise')}`;
+    if (!confirm(`Replace this phone's log with the copy on GitHub (${what})?`)) return;
+    // Written locally only: it just came from GitHub, so there is nothing new to send back.
+    state = saved;
+    writeLocal();
+    rest.setMode(state.rest);
+    Object.assign(ui, { tab: 'train', reviewing: false, week: null, open: undefined, exercise: null });
+    render();
+    scrollTop();
+    toast('Loaded your log from GitHub.');
+  },
   'sync-disconnect'() {
     sync.disconnect();
     render();
@@ -1088,6 +1549,8 @@ document.addEventListener('submit', (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  // Only the app's own settings controls; fields in sheets and forms are read when they're submitted.
+  if (e.target.closest('dialog, #exercise-form, #bodyweight-form, #review-form, .max-form, .sync-form')) return;
   const { name, value } = e.target;
   if (name === 'unit') {
     if (state.blocks.length === 0) {
@@ -1109,12 +1572,18 @@ document.addEventListener('change', (e) => {
     state.trainingMax = value === 'true';
     save();
     render();
-  } else if (name === 'rest') {
+  } else if (name === 'rest' && REST_MODES.includes(value)) {
     state.rest = value;
     rest.setMode(value);
     save();
   } else if (name === 'lift') {
     ui.lift = value;
+    render();
+  } else if (name === 'historyView') {
+    Object.assign(ui, { history: value, exercise: null });
+    render();
+  } else if (name === 'variant') {
+    ui.variant = value || null;
     render();
   }
 });
@@ -1129,8 +1598,8 @@ document.addEventListener('keydown', (e) => {
   const figure = e.target.closest?.('.chart');
   if (!figure) return;
   if (e.key === 'Escape') return hideTip(figure);
-  const n = chartWeeks.length;
-  const at = figure.dataset.index === undefined ? latestIndex() : Number(figure.dataset.index);
+  const n = chartData[figure.dataset.chart].length;
+  const at = figure.dataset.index === undefined ? latestIndex(figure.dataset.chart) : Number(figure.dataset.index);
   const moves = { ArrowLeft: at - 1, ArrowRight: at + 1, Home: 0, End: n - 1 };
   if (!(e.key in moves)) return;
   e.preventDefault();
@@ -1139,7 +1608,7 @@ document.addEventListener('keydown', (e) => {
 
 // Focus from the keyboard shows the latest week; a tap already placed the crosshair before focus lands.
 document.addEventListener('focusin', (e) => {
-  if (e.target.matches?.('.chart') && e.target.dataset.index === undefined) showTip(e.target, latestIndex());
+  if (e.target.matches?.('.chart') && e.target.dataset.index === undefined) showTip(e.target, latestIndex(e.target.dataset.chart));
 });
 
 let lastWidth = window.innerWidth;

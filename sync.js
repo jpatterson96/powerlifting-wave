@@ -182,6 +182,26 @@ export async function connect(token) {
   return { ok: true, remote };
 }
 
+// Reads the log saved on GitHub so changes made away from this phone can be loaded onto it.
+// Refuses while this phone has changes of its own still waiting to save, so neither side is lost.
+export async function fetchSaved() {
+  if (!cfg.token) return { ok: false, message: 'Connect to GitHub first.' };
+  if (cfg.dirty || running) return { ok: false, message: 'This phone still has changes saving to GitHub. Try again in a few seconds.' };
+  try {
+    const remote = await readRemote(cfg.token);
+    if (!remote?.state) return { ok: false, message: 'There is no readable log saved on GitHub yet.' };
+    cfg.sha = remote.sha;
+    store();
+    return { ok: true, state: remote.state };
+  } catch (err) {
+    if ([401, 403, 404].includes(err.status)) {
+      setStatus('bad-key');
+      return { ok: false, message: 'GitHub rejected the access key. Disconnect, then connect with a new key.' };
+    }
+    return { ok: false, message: "Couldn't reach GitHub. Check your connection and try again." };
+  }
+}
+
 export function disconnect() {
   clearTimeout(timer);
   cfg = {};

@@ -195,7 +195,7 @@ export function warmups(max, working, unit, increment, ramp = RAMP) {
 }
 
 export function emptyState(unit = 'lb') {
-  return { v: 3, unit, round: ROUNDING[unit][0], trainingMax: false, rest: 'sound', blocks: [] };
+  return { v: 3, unit, round: ROUNDING[unit][0], trainingMax: false, rest: 'sound', blocks: [], exercises: [], bodyweight: [] };
 }
 
 // Re-max every second block: often enough to keep the max honest, rare enough to spend most blocks training.
@@ -225,7 +225,7 @@ export function newBlock(max, started, finish = 'remax') {
 }
 
 const touched = (session) => session.skipped || session.reps.some((r) => r !== null) || session.weight !== null ||
-  Boolean(session.weights?.some((w) => w !== null));
+  Boolean(session.weights?.some((w) => w !== null)) || Boolean(session.extras?.some((x) => x.skipped || x.sets.some(Boolean)));
 
 // Switches week 8 between a re-max and a deload; only before anything in it is logged.
 export function setFinish(block, finish) {
@@ -388,12 +388,20 @@ export function convertState(state, to) {
   const factor = to === 'kg' ? 1 / LB_PER_KG : LB_PER_KG;
   // Full precision so switching back and forth returns the original numbers; the screen rounds for display.
   const conv = (n) => (n === null ? null : n * factor);
+  const extras = (list) => list.map((x) => ({ ...x, sets: x.sets.map((s) => s && { ...s, weight: conv(s.weight) }) }));
   const blocks = state.blocks.map((b) => ({
     ...b,
     max: Object.fromEntries(Object.entries(b.max).map(([k, v]) => [k, conv(v)])),
-    log: b.log.map((week) => week.map((s) => ({ ...s, weight: conv(s.weight), ...(s.weights && { weights: s.weights.map(conv) }) }))),
+    log: b.log.map((week) => week.map((s) => ({
+      ...s, weight: conv(s.weight), ...(s.weights && { weights: s.weights.map(conv) }), ...(s.extras && { extras: extras(s.extras) }),
+    }))),
   }));
-  return { ...state, unit: to, round: ROUNDING[to][0], blocks };
+  return {
+    ...state, unit: to, round: ROUNDING[to][0], blocks,
+    ...(state.exercises && { exercises: state.exercises.map((e) => ({ ...e, step: conv(e.step) })) }),
+    ...(state.bodyweight && { bodyweight: state.bodyweight.map((e) => ({ ...e, weight: conv(e.weight) })) }),
+    ...(state.imported && { imported: state.imported.map((w) => ({ ...w, extras: extras(w.extras) })) }),
+  };
 }
 
 const validReps = (reps, sets) =>
@@ -448,7 +456,9 @@ function carryOver(old, firstWeeks, index) {
 function fromV2(s) {
   const blocks = s.blocks.map((b, i) => carryOver(b, b.log.slice(0, FIRST_TEST + 1)
     .map((week) => week.map(({ day, lift, kind, reps, weight, skipped }) => ({ day, lift, kind, reps: [...reps], weight: weight ?? null, skipped }))), i));
-  return { v: 3, unit: s.unit, round: s.round, trainingMax: s.trainingMax, rest: 'sound', blocks };
+  // Accessory data has no version of its own; it rides along and is checked by cleanExtras.
+  const { exercises, bodyweight, imported } = s;
+  return { v: 3, unit: s.unit, round: s.round, trainingMax: s.trainingMax, rest: 'sound', blocks, exercises, bodyweight, imported };
 }
 
 // Version 1 (the first release) had one session per lift per week and always a deload.

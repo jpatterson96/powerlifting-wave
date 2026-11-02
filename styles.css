@@ -787,6 +787,118 @@ legend.setting-title + * {
   font: 800 30px var(--display);
 }
 
+/* ---------- Accessories: smaller lights under the day's main lift ---------- */
+
+.extras {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--line);
+}
+
+.extras-title {
+  font: 700 24px/1 var(--display);
+}
+
+.extra-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.extra {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.extra-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.extra-name {
+  font: 700 22px/1.1 var(--display);
+}
+
+.extra.is-skipped .extra-name {
+  color: var(--steel);
+}
+
+.extra.is-skipped .btn-quiet {
+  min-height: 36px;
+}
+
+.chip {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1.5px solid var(--steel);
+  border-radius: 18px;
+  background: none;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.chip::after {
+  content: " ⇄";
+  color: var(--muted);
+}
+
+.chip.is-static {
+  display: inline-flex;
+  align-items: center;
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.chip.is-static::after {
+  content: none;
+}
+
+.extra-note {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.extra-sets {
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.extra-set {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.extra-set .set {
+  width: 46px;
+  height: 46px;
+  font-size: 21px;
+}
+
+.extra-weight {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.extra-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin-top: 6px;
+}
+
+.extras > .btn-quiet {
+  margin-top: 8px;
+  padding-left: 0;
+}
+
 .block-end {
   padding-top: 26px;
   border-top: 1px solid var(--line);
@@ -1031,6 +1143,132 @@ legend.setting-title + * {
   text-align: center;
 }
 
+.history-pick {
+  margin-top: 20px;
+}
+
+.history-pick .seg-option span {
+  padding: 9px 13px;
+}
+
+.history-pick + .lift-pick {
+  margin-top: 14px;
+}
+
+.variant-pick {
+  margin-top: 14px;
+}
+
+.history-pick + .back {
+  margin-top: 12px;
+}
+
+/* Rows that open something: exercises in History and Settings, and the add-an-exercise list. */
+.index-list {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.index-list > li {
+  border-bottom: 1px solid var(--line);
+}
+
+.index-row {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-height: 56px;
+  padding: 12px 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+
+.index-name {
+  font: 700 22px/1.1 var(--display);
+}
+
+.index-meta {
+  color: var(--muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.exercise-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 20px;
+}
+
+.icon-btn:disabled {
+  color: var(--line);
+  cursor: default;
+}
+
+.setting .index-list + .btn {
+  margin-top: 16px;
+}
+
+.pick-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+
+.pick-list .index-row {
+  border-bottom: 1px solid var(--line);
+}
+
+.detail-title {
+  margin-top: 6px;
+  font-size: 34px;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 28px;
+  margin: 18px 0 0;
+}
+
+.stats dt {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.stats dd {
+  margin: 2px 0 0;
+  font: 800 30px/1 var(--display);
+}
+
+.sets-cell {
+  text-align: left !important;
+}
+
+.body-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 16px;
+  margin-top: 22px;
+}
+
+.chart-dot.is-series-1 {
+  fill: var(--series-1);
+}
+
 .chart-table {
   margin-top: 18px;
 }
@@ -1161,6 +1399,81 @@ legend.setting-title + * {
   border-radius: 12px;
   background: var(--bg);
   font: 700 28px/1 var(--display);
+}
+
+.sheet-body {
+  max-height: 100dvh;
+  overflow-y: auto;
+}
+
+.sheet-weight {
+  margin-bottom: 18px;
+}
+
+.exercise-form {
+  display: grid;
+  gap: 18px;
+}
+
+.exercise-form .sheet-title {
+  margin-bottom: 2px;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 16px;
+}
+
+.num-small {
+  font-size: 30px;
+}
+
+.day-boxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.day-box {
+  position: relative;
+}
+
+.day-box input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+}
+
+.day-box span {
+  display: block;
+  min-width: 52px;
+  padding: 10px 0;
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  font-weight: 700;
+  text-align: center;
+}
+
+.day-box input:checked + span {
+  border-color: var(--chalk);
+  background: var(--chalk);
+  color: var(--ink);
+}
+
+.day-box input:focus-visible + span {
+  outline: 2px solid var(--chalk);
+  outline-offset: 2px;
+}
+
+.sheet-actions-end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
 }
 
 .rep-grid.is-judging {

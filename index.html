@@ -38,6 +38,13 @@
     <div class="sheet-body">
       <h2 class="sheet-title" id="reps-title"></h2>
       <p class="sheet-note" id="reps-note"></p>
+      <label class="field sheet-weight" id="reps-weight-field" hidden>
+        <span class="field-label">Weight</span>
+        <span class="field-row">
+          <input class="num-input" id="reps-weight" type="number" inputmode="decimal" step="any" min="0">
+          <span class="field-unit" id="reps-weight-unit"></span>
+        </span>
+      </label>
       <div class="rep-grid" id="rep-grid"></div>
       <div class="sheet-actions">
         <button class="btn-quiet" data-action="reps-clear">Clear set</button>
@@ -62,6 +69,67 @@
         <button class="btn" data-action="weight-save">Save weight</button>
       </div>
     </div>
+  </dialog>
+
+  <dialog class="sheet" id="pick-sheet" aria-labelledby="pick-title">
+    <div class="sheet-body">
+      <h2 class="sheet-title" id="pick-title">Add an exercise</h2>
+      <p class="sheet-note" id="pick-note"></p>
+      <div class="pick-list" id="pick-list"></div>
+      <div class="sheet-actions">
+        <button class="btn-quiet" data-action="exercise-new">New exercise</button>
+        <button class="btn-quiet" data-action="sheet-close">Cancel</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="sheet" id="exercise-sheet" aria-labelledby="exercise-title">
+    <form class="sheet-body exercise-form" id="exercise-form" novalidate>
+      <h2 class="sheet-title" id="exercise-title">New exercise</h2>
+      <label class="field">
+        <span class="field-label">Name</span>
+        <span class="field-row"><input class="text-input" name="name" maxlength="60" autocomplete="off" placeholder="Shoulder press"></span>
+      </label>
+      <label class="field">
+        <span class="field-label">Variants, separated by commas (optional)</span>
+        <span class="field-row"><input class="text-input" name="variants" maxlength="200" autocomplete="off" placeholder="Dumbbell, Machine"></span>
+      </label>
+      <div class="field-grid">
+        <label class="field">
+          <span class="field-label">Sets</span>
+          <span class="field-row"><input class="num-input num-small" name="sets" type="number" inputmode="numeric" min="1" max="10"></span>
+        </label>
+        <label class="field">
+          <span class="field-label">Reps from</span>
+          <span class="field-row"><input class="num-input num-small" name="low" type="number" inputmode="numeric" min="1" max="50"></span>
+        </label>
+        <label class="field">
+          <span class="field-label">to</span>
+          <span class="field-row"><input class="num-input num-small" name="high" type="number" inputmode="numeric" min="1" max="50"></span>
+        </label>
+      </div>
+      <div class="field-grid">
+        <label class="field">
+          <span class="field-label">Weight jump</span>
+          <span class="field-row"><input class="num-input num-small" name="step" type="number" inputmode="decimal" step="any" min="0"><span class="field-unit" id="exercise-unit"></span></span>
+        </label>
+        <label class="field">
+          <span class="field-label">Rest, seconds</span>
+          <span class="field-row"><input class="num-input num-small" name="restSeconds" type="number" inputmode="numeric" min="15" max="900"></span>
+        </label>
+      </div>
+      <fieldset class="day-pick">
+        <legend class="field-label">Shows up on</legend>
+        <div class="day-boxes" id="exercise-days"></div>
+      </fieldset>
+      <div class="sheet-actions">
+        <button class="btn-quiet" type="button" data-action="exercise-delete" id="exercise-delete">Delete</button>
+        <span class="sheet-actions-end">
+          <button class="btn-quiet" type="button" data-action="sheet-close">Cancel</button>
+          <button class="btn" type="submit">Save</button>
+        </span>
+      </div>
+    </form>
   </dialog>
 
   <input type="file" id="restore-input" accept=".json,application/json,text/plain" hidden>

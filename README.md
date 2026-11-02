@@ -95,14 +95,32 @@ the background) and follow the ring/silent switch: getting past it would mean st
 Every logged set records the weight lifted, so changing a setting or a max later never rewrites past
 results.
 
+## Accessories
+
+Your own exercises, listed under each day's main lift. **Settings → Accessories** sets each one's
+days, sets, rep range (e.g. 3 × 8–12), weight jump and rest; **Add an exercise** on a training day
+adds one to that day only.
+
+- **Skip today** for anything you don't do that day; nothing is counted against it.
+- Exercises with variants (e.g. *Dumbbell, Machine*) have a switch; each variant keeps its own
+  numbers, and the one you used last comes up next time.
+- Double progression: each set is prefilled from last time with one more rep, until every set
+  reaches the top of the range; then the weight goes up by the jump and reps start from the bottom.
+  Tap a light to log it as shown; tap a logged one to change it. Use 0 for body-weight exercises.
+
+Apple Health isn't reachable from a web app, so body weight is logged in the app (History → Body).
+
 ## History
 
-Pick a lift to see two charts that share one week-by-week axis across every block:
+**Lifts**: pick a lift to see two charts that share one week-by-week axis across every block:
 
 - the max each week trained from, with orange dots for test-set estimates and re-max singles;
 - weekly volume (weight × reps).
 
 Tap or drag across a chart for a week's numbers; the same numbers are in "week by week" below it.
+
+**Accessories**: each exercise's heaviest set, estimated max, best session, a chart of its best set
+by session, and recent sessions. **Body**: log today's weight and see it charted.
 
 ## Missed days
 
@@ -127,6 +145,9 @@ It needs an access key that can only touch that one repository:
 
 The key is stored only on the phone. If the phone is lost, delete the key on that same GitHub page.
 On a new phone, use **Restore from GitHub** on the first screen with a new key.
+
+**Load from GitHub** (Settings) replaces the phone's log with the saved copy, for changes made to
+`data.json` somewhere else. It waits until the phone's own changes have finished saving, and asks first.
 
 ## Run it on this PC
 

@@ -1,41 +1,93 @@
 # Powerlifting Wave
 
 A personal tracker for the 4-week squat / bench / deadlift wave (70% → 75% → 82.5% → 50% deload).
-It's a static web app: no server code, no accounts. Workout data stays on the phone.
+It's a static web app: no server code. The log lives on the phone and, optionally, in a private
+GitHub repository.
+
+Live at https://jpatterson96.github.io/powerlifting-wave/
+
+## The training week
+
+| Day       | Lift        | Session                  |
+|-----------|-------------|--------------------------|
+| Monday    | Bench press | Template                 |
+| Tuesday   | Squat       | Template                 |
+| Wednesday | Deadlift    | Template                 |
+| Thursday  | Bench press | Heavy day                |
+| Friday    | Squat       | Heavy day                |
+
+| Week | Template days            | Heavy days            |
+|------|--------------------------|-----------------------|
+| 1    | 3 × 6 at 70%             | 3 × 4 at 77.5%        |
+| 2    | 4 × 4 at 75%             | 4 × 3 at 82.5%        |
+| 3    | 5 × 2 at 82.5%, last set "2+" | 3 × 2 at 87.5%   |
+| 4 (deload, optional) | 2 × 5 at 60%  | 2 × 5 at 60%         |
+
+The heavy days, the 60% deload and the every-other-block deload come from a research review
+(loads above ~80% build max strength best; the template's light weeks don't need a deload every
+block). On heavy days, stop each set with about 2 reps left. Each day also shows warm-up weights.
+
+The app opens the next day you haven't finished. A missed day waits until you do it or tap
+**Skip this day** (undo is available). If you skip most of a week, the app offers to repeat it;
+after two or more weeks off, it offers to restart the block at week 1.
+
+## Blocks and deloads
+
+Block 1 is three weeks. At the end of each block the review screen asks whether the next block
+ends with a deload week; it defaults to every second block. A deload can also be added or removed
+from the week picker during a block. After a deload, the review suggests retesting your maxes.
+
+**Settings → Work from** switches the percentages to a 90% training max, for when a max was a grind
+or the "2+" sets start coming up short.
+
+## How the next block's maxes are set
+
+- Only days you trained in weeks 1–3 are judged. Skipped days don't count for or against you.
+- Every set on those days at or above target reps → the lift goes up.
+- The increase depends on extra reps on the "2+" set (last set of each week 3 template day),
+  taking your best one: 1 / 2 / 3+ extra = +5 / +7.5 / +10 lb for squat and deadlift,
+  +2.5 / +3.75 / +5 lb for bench (kg: +2.5 / +3.75 / +5 and +1.25 / +2 / +2.5).
+- Only the target reps on the "2+" set means the max is probably set too high, so it stays the
+  same. If that day was skipped, the low step applies.
+- A short or half-logged day → that lift repeats at the same max.
+- The review screen lets you change any suggested max before starting the next block.
+
+## Saving to GitHub
+
+The app can save the log to the private repository `jpatterson96/powerlifting-wave-data`
+a few seconds after every change. GitHub keeps every version as a commit.
+
+It needs an access key that can only touch that one repository:
+
+1. In Safari on the phone, sign in to github.com and open
+   https://github.com/settings/personal-access-tokens/new
+2. **Token name**: `Powerlifting Wave phone`. **Expiration**: the longest option offered.
+3. **Repository access**: *Only select repositories* → `powerlifting-wave-data`.
+4. **Permissions** → **Repository permissions** → **Contents** → *Read and write*.
+5. **Generate token**, then copy it (it starts with `github_pat_`).
+6. In the app: **Settings → Save to GitHub**, paste the key, **Connect**.
+
+The key is stored only on the phone. If the phone is lost, delete the key on that same GitHub page.
+On a new phone, use **Restore from GitHub** on the first screen with a new key.
 
 ## Run it on this PC
 
 ```
 npm start        # serves at http://localhost:8000
-npm test         # program rules: percentages, rounding, plates, next-block increases
+npm test         # program rules: percentages, rounding, plates, schedule, next-block increases
 ```
-
-## Put it on an iPhone
-
-1. Publish this folder to any free HTTPS static host (GitHub Pages, Netlify, Cloudflare Pages).
-   iOS only allows offline web apps from an `https://` address.
-2. Open the address in Safari, tap Share, then **Add to Home Screen**.
-3. Always open it from the home-screen icon. Safari tabs keep separate data.
-
-After the first open it works with no signal.
 
 ## Updating
 
-Change the files, bump `CACHE` in `sw.js` (for example `wave-v2`), and publish again.
-The phone downloads the new version in the background and shows it the next time the app opens.
+Change the files, bump `CACHE` in `sw.js`, commit and push to `main`. GitHub Pages republishes in
+about a minute; the phone downloads the new version in the background and shows it the next time
+the app opens.
 
-## Data and backups
+## Backups
 
-Everything is saved in the phone's local storage for this site. Use **Settings → Save backup**
-to keep a copy in Files, and **Restore backup** on a new phone.
+**Settings → Save backup** writes the whole log to a file (Files or iCloud Drive), and
+**Restore backup** reads one back. Deleting the home-screen icon on iPhone also deletes the app's
+data on the phone, so keep GitHub saving on or a backup file around.
 
-## How the next block's maxes are set
-
-- Every set in weeks 1–3 at or above target reps → the lift goes up.
-- The increase depends on extra reps on the last set of week 3 (the "2+" set):
-  0 / 1 / 2+ extra = +5 / +7.5 / +10 lb for squat and deadlift, +2.5 / +3.75 / +5 lb for bench
-  (kg: +2.5 / +3.75 / +5 and +1.25 / +2 / +2.5).
-- Any short or unlogged set in weeks 1–3 → that lift repeats at the same max.
-- The review screen lets you change any suggested max before starting the next block.
-
-Rules live in `logic.js`; the app icon is generated by `python tools/make_icons.py`.
+Rules live in `logic.js`, GitHub saving in `sync.js`; the app icon is generated by
+`python tools/make_icons.py`.

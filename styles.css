@@ -212,6 +212,84 @@ main {
   margin-top: 22px;
 }
 
+.text-input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  color: var(--chalk);
+  font: 17px var(--text);
+}
+
+.text-input:focus {
+  outline: none;
+}
+
+.text-input::placeholder {
+  color: var(--steel);
+}
+
+.sync-form {
+  display: grid;
+  justify-items: start;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.sync-form .field {
+  width: 100%;
+}
+
+/* Same light language as the sets: white saved, steel waiting, red needs attention. */
+.sync-status {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.sync-status::before {
+  content: "";
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--chalk);
+  box-shadow: 0 0 10px 1px rgba(238, 241, 244, 0.35);
+  transform: translateY(-1px);
+}
+
+.sync-status[data-state="pending"]::before,
+.sync-status[data-state="saving"]::before {
+  background: var(--steel);
+  box-shadow: none;
+}
+
+.sync-status[data-state="offline"]::before,
+.sync-status[data-state="bad-key"]::before,
+.sync-status[data-state="error"]::before {
+  background: var(--red);
+  box-shadow: 0 0 10px 1px rgba(224, 72, 62, 0.4);
+}
+
+.restore-github {
+  margin-top: 16px;
+}
+
+.restore-github summary {
+  display: inline-flex;
+  align-items: center;
+  list-style: none;
+}
+
+.restore-github summary::-webkit-details-marker {
+  display: none;
+}
+
+.restore-github[open] summary {
+  color: var(--chalk);
+}
+
 /* ---------- Segmented control ---------- */
 
 fieldset {
@@ -312,13 +390,13 @@ legend.setting-title + * {
   border: 0;
 }
 
-.setup .max-form + .btn-quiet,
 .setup .max-form {
   margin-top: 26px;
 }
 
-.setup .max-form + .btn-quiet {
-  margin-top: 16px;
+.setup .restore-github + .btn-quiet {
+  display: block;
+  margin-top: 4px;
 }
 
 /* ---------- Week wave ---------- */
@@ -378,9 +456,58 @@ legend.setting-title + * {
   color: var(--chalk);
 }
 
+/* The deload slot that isn't part of this block yet: a dashed outline you can tap to add. */
+.wave-add .wave-bar {
+  border-style: dashed;
+  border-bottom-width: 0;
+  background: none;
+}
+
+.wave-add .wave-label,
+.wave-add .wave-pct {
+  color: var(--steel);
+}
+
+.notice {
+  margin-top: 22px;
+  padding: 16px;
+  border: 1.5px solid var(--steel);
+  border-radius: 14px;
+}
+
+.notice .button-row {
+  margin-top: 12px;
+}
+
 .week-head {
   margin-top: 26px;
   padding-bottom: 6px;
+}
+
+.week-head .btn-quiet {
+  margin-top: 6px;
+  padding-left: 0;
+}
+
+.warmup {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+}
+
+.check input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--chalk);
 }
 
 .week-title {
@@ -393,19 +520,80 @@ legend.setting-title + * {
   max-width: 34em;
 }
 
-/* ---------- Lift ---------- */
+/* ---------- Training days ---------- */
 
-.lift {
-  padding: 24px 0 26px;
+.sessions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session {
   border-top: 1px solid var(--line);
 }
 
-.lift-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 12px;
+.session-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "day state"
+    "lift state";
+  align-items: center;
+  width: 100%;
+  padding: 16px 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+
+.session-day {
+  grid-area: day;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.session-lift {
+  grid-area: lift;
+  font: 700 28px/1.05 var(--display);
+}
+
+.session-state {
+  grid-area: state;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.session[data-next] .session-state {
+  color: var(--chalk);
+}
+
+/* A finished day gets the same white light as a good set. */
+.session[data-status="done"] .session-state::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--chalk);
+  box-shadow: 0 0 8px 1px rgba(238, 241, 244, 0.35);
+  transform: translateY(-1px);
+}
+
+.session[data-status="skipped"] .session-lift,
+.session[data-status="skipped"] .session-day {
+  color: var(--steel);
+}
+
+.session-body {
+  padding: 0 0 26px;
+}
+
+.session-body .skip {
+  display: block;
+  margin-top: 14px;
 }
 
 .lift-name {
@@ -752,10 +940,11 @@ legend.setting-title + * {
 
 /* ---------- Toast ---------- */
 
+/* At the top, so it never covers the primary button at the bottom of a form. */
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(env(safe-area-inset-bottom) + 72px);
+  top: calc(env(safe-area-inset-top) + 12px);
   z-index: 20;
   width: max-content;
   max-width: calc(100% - 40px);
@@ -767,8 +956,9 @@ legend.setting-title + * {
   font-weight: 600;
   opacity: 0;
   pointer-events: none;
-  transform: translate(-50%, 12px);
+  transform: translate(-50%, -12px);
   transition: opacity 0.2s, transform 0.2s;
+  box-shadow: 0 6px 24px rgba(6, 12, 18, 0.5);
 }
 
 .toast.is-on {

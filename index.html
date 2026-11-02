@@ -19,6 +19,15 @@
 <body>
   <main id="view"></main>
 
+  <aside class="rest" id="rest" aria-label="Rest timer" hidden>
+    <span class="rest-track" aria-hidden="true"><span class="rest-fill" id="rest-fill"></span></span>
+    <span class="rest-time" id="rest-time" role="timer">0:00</span>
+    <span class="rest-label" id="rest-label" aria-live="polite">Rest</span>
+    <button class="rest-btn rest-add" data-action="rest-add">+30 s</button>
+    <button class="rest-btn rest-stop" data-action="rest-stop">Done</button>
+    <span class="rest-next" id="rest-next"></span>
+  </aside>
+
   <nav class="tabs" id="tabs" aria-label="Sections" hidden>
     <button class="tab" data-action="tab" data-tab="train">Train</button>
     <button class="tab" data-action="tab" data-tab="history">History</button>

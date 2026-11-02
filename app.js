@@ -1,22 +1,29 @@
 import {
-  LIFTS, WEEKS, DELOAD_WEEK, TEST_WEEK, isTestSet, prescription, ROUNDING, BAR, tidy, workingMax, targetWeight,
-  platesPerSide, warmups, emptyState, newBlock, setDeload, sessionStatus, weekProgress, nextSession, currentWeek,
-  weekToRepeat, resetWeek, longBreak, restartBlock, evaluateLift, convertState, upgrade,
+  LIFTS, WEEKS, BLOCK_WEEKS, WAVE_TWO, FIRST_TEST, FINISH_WEEK, ATTEMPTS, ATTEMPT_NAMES, REMAX_RAMP, BUMPS, isTestSet,
+  prescription, ROUNDING, BAR, tidy, roundTo, workingMax, targetWeight, estimateMax, weekMax, attemptBase, attemptWeight, setWeight,
+  singleWeight, restSeconds, platesPerSide, warmups, emptyState, newBlock, finishFor, setFinish, sessionStatus,
+  weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak, restartBlock, evaluateLift, liftHistory,
+  convertState, upgrade,
 } from './logic.js';
 import * as sync from './sync.js';
+import * as rest from './rest.js';
+import { maxChart, volumeChart } from './charts.js';
 
 const KEY = 'powerlifting-wave';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
 const repsSheet = document.getElementById('reps-sheet');
+const repGrid = document.getElementById('rep-grid');
 const weightSheet = document.getElementById('weight-sheet');
 const weightInput = document.getElementById('weight-input');
 const restoreInput = document.getElementById('restore-input');
 
 let state = load();
 // `open` is the index of the expanded day in the shown week; undefined means "pick the next day to train".
-const ui = { tab: 'train', reviewing: false, week: null, open: undefined, sheet: null };
+const ui = { tab: 'train', reviewing: false, week: null, open: undefined, sheet: null, lift: 'squat' };
+// The week-by-week numbers behind the History charts, for their tooltips.
+let chartWeeks = [];
 
 // Colour, height and thickness for one side of the bar, heaviest plates biggest.
 const PLATE_STYLE = {
@@ -56,6 +63,7 @@ const block = () => state.blocks[state.blocks.length - 1];
 // Two decimals covers 288.75-style maxes and hides the long tails left by unit conversion.
 const fmt = (n) => String(Math.round(n * 100) / 100);
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const restText = (s) => (s % 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s / 60} min`);
 
 function todayISO() {
   const d = new Date();
@@ -74,8 +82,11 @@ function savedAt(isoTime) {
   return `on ${t.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at ${time}`;
 }
 
-// Exaggerates the gap between 50% and 82.5% so the wave shape reads at small sizes.
-const waveHeight = (pct, min, max) => min + ((pct - 0.5) / 0.325) * (max - min);
+// Exaggerates the gap between 55% and a max attempt so the wave shape reads at small sizes.
+const waveHeight = (pct, min, max) => min + ((pct - 0.55) / 0.47) * (max - min);
+
+const weekName = (b, w) => (w === FINISH_WEEK ? (b.finish === 'remax' ? 'Re-max' : 'Deload') : WEEKS[w].name);
+const weekPct = (b, w) => (w === FINISH_WEEK ? (b.finish === 'remax' ? 1 : 0.6) : WEEKS[w].base.pct);
 
 let toastTimer;
 function toast(message) {
@@ -109,12 +120,13 @@ function render() {
   if (focusKey) view.querySelector(`[data-key="${focusKey}"]`)?.focus({ preventScroll: true });
 }
 
+// Both waves and the re-max, as one double wave.
 function waveMark() {
-  const bars = [0.70, 0.75, 0.825, 0.50].map((pct, i) => {
-    const h = waveHeight(pct, 34, 96);
-    return `<rect x="${i * 30}" y="${100 - h}" width="20" height="${h}" class="${i === 3 ? 'mark-deload' : ''}"/>`;
+  const bars = [0.70, 0.75, 0.825, 0.75, 0.80, 0.85, 0.80, 1].map((pct, i) => {
+    const h = waveHeight(pct, 30, 96);
+    return `<rect x="${i * 14}" y="${100 - h}" width="10" height="${h}"/>`;
   }).join('');
-  return `<svg class="wave-mark" viewBox="0 0 110 106" aria-hidden="true">${bars}<rect class="mark-floor" x="0" y="102" width="110" height="4"/></svg>`;
+  return `<svg class="wave-mark" viewBox="0 0 108 106" aria-hidden="true">${bars}<rect class="mark-floor" x="0" y="102" width="108" height="4"/></svg>`;
 }
 
 function segmented(name, options, current) {
@@ -156,7 +168,7 @@ function setupView() {
   return `<section class="setup">
     ${waveMark()}
     <h1 class="display">Powerlifting Wave</h1>
-    <p class="lede">Enter your current one-rep max for each lift. Every working weight in the block comes from these numbers.</p>
+    <p class="lede">Enter your current one-rep max for each lift. Every working weight in the 8-week block comes from these numbers.</p>
     <fieldset class="setting">
       <legend class="setting-title">Units</legend>
       ${segmented('unit', unitOptions(), state.unit)}
@@ -210,13 +222,25 @@ function syncSection() {
   </section>`;
 }
 
-function weekNote(week) {
-  const w = WEEKS[week];
-  if (week === TEST_WEEK) {
-    return `${w.note}. Monday to Wednesday, the last set (marked 2+) is as many clean reps as you can: use a spotter or safety arms. On Thursday and Friday, stop each set with about 2 reps left.`;
+const HEAVY_CUE = 'Thursday and Friday are heavier days with fewer reps. They should feel smooth, with 2–4 reps left; harder than that means your max is set too high.';
+const TEST_CUE = 'Monday to Wednesday, the last set (marked 2+) is as many clean reps as you can: use a spotter or safety arms.';
+
+function weekNote(b, week) {
+  if (week === FINISH_WEEK) {
+    return b.finish === 'remax'
+      ? 'Test your max: bench Monday, squat Tuesday, deadlift Wednesday, and no Thursday or Friday. Your best good single becomes your next max.'
+      : 'Recovery: light weights on all five days so the next block starts fresh. Your next maxes come from your week 6 test sets.';
   }
-  if (week === DELOAD_WEEK) return `${w.note}: lighter weights so you start the next block fresh. This week doesn't count toward your next increase.`;
-  return `${w.note}. Thursday and Friday are heavier days with fewer reps. Missed a day? Do it next time you train, or skip it.`;
+  if (week === FIRST_TEST) return `Heavy peak. ${TEST_CUE} It sets your max for weeks 4–8.`;
+  if (week === FIRST_TEST + 3) {
+    const next = b.finish === 'remax' ? 'your re-max attempts in week 8' : 'your next block’s max';
+    return `The heaviest week. ${TEST_CUE} It sets ${next}.`;
+  }
+  if (week === FINISH_WEEK - 1) {
+    return 'Less work at the same weights, so you’re fresh for week 8. Monday to Wednesday start with one heavy single, then two easy doubles. Thursday and Friday, move the bar fast.';
+  }
+  if (week === WAVE_TWO) return `The first wave again, about 5% heavier with a rep fewer, from the max your week 3 test sets settled on. ${HEAVY_CUE}`;
+  return `${WEEKS[week].note}. ${HEAVY_CUE} Missed a day? Do it next time you train, or skip it.`;
 }
 
 // Opens the next day to train if it's in this week, otherwise the week's first unfinished day.
@@ -258,6 +282,9 @@ function trainView() {
   if (ui.open === undefined) ui.open = defaultOpen(b, ui.week);
   const next = nextSession(b);
   const last = ui.week === b.log.length - 1;
+  const finish = ui.week === FINISH_WEEK
+    ? `<button class="btn-quiet" data-action="switch-finish">${b.finish === 'remax' ? 'Deload this week instead' : 'Re-max this week instead'}</button>`
+    : '';
   return `<header class="top">
       <h1 class="display">Block ${n}</h1>
       <p class="top-meta">Started ${shortDate(b.started)}</p>
@@ -265,9 +292,10 @@ function trainView() {
     ${notice(b)}
     ${waveNav(b)}
     <section class="week-head">
-      <h2 class="week-title">${WEEKS[ui.week].name}</h2>
-      <p class="week-note">${weekNote(ui.week)}</p>
-      ${ui.week === DELOAD_WEEK ? '<button class="btn-quiet" data-action="remove-deload">Remove the deload week</button>' : ''}
+      <p class="week-count">Week ${ui.week + 1} of ${BLOCK_WEEKS}</p>
+      <h2 class="week-title">${weekName(b, ui.week)}</h2>
+      <p class="week-note">${weekNote(b, ui.week)}</p>
+      ${finish}
     </section>
     <ol class="sessions">
       ${b.log[ui.week].map((s, i) => sessionView(b, s, i, next?.week === ui.week && next.index === i)).join('')}
@@ -279,43 +307,35 @@ function trainView() {
 }
 
 function waveNav(b) {
-  const bar = (pct, fill) => `<span class="wave-bar" style="--h:${waveHeight(pct, 18, 52).toFixed(1)}px;--fill:${fill}"></span>`;
   const weeks = b.log.map((_, i) => {
     const p = weekProgress(b, i);
-    const pct = prescription('base', i).pct;
     return `<button class="wave-week" data-action="week" data-week="${i}" data-key="week-${i}" aria-pressed="${i === ui.week}"
-        aria-label="Week ${i + 1}, ${WEEKS[i].name}, ${Math.round(p * 100)}% done">
-      ${bar(pct, p.toFixed(3))}
-      <span class="wave-label">Week ${i + 1}</span>
-      <span class="wave-pct">${tidy(pct * 100)}%</span>
+        aria-label="Week ${i + 1}, ${weekName(b, i)}, ${Math.round(p * 100)}% done">
+      <span class="wave-bar" style="--h:${waveHeight(weekPct(b, i), 12, 50).toFixed(1)}px;--fill:${p.toFixed(3)}"></span>
+      <span class="wave-label">${i + 1}</span>
     </button>`;
   });
-  if (!b.deload) {
-    weeks.push(`<button class="wave-week wave-add" data-action="add-deload" data-key="add-deload" aria-label="Add a deload week to this block">
-      ${bar(prescription('base', DELOAD_WEEK).pct, 0)}
-      <span class="wave-label">Deload</span>
-      <span class="wave-pct">Add</span>
-    </button>`);
-  }
   return `<nav class="wave" aria-label="Weeks">${weeks.join('')}</nav>`;
 }
 
 const liftOf = (session) => LIFTS.find((l) => l.id === session.lift);
-const isHeavyDay = (session) => session.kind === 'heavy' && ui.week !== DELOAD_WEEK;
+const isHeavyDay = (session) => session.kind === 'heavy' && ui.week !== FINISH_WEEK;
 
 function sessionView(b, session, i, isNext) {
   const status = sessionStatus(session);
   const logged = session.reps.filter((r) => r !== null).length;
+  const what = session.kind === 'max' ? 'attempt' : 'set';
   const label = {
     skipped: 'Skipped',
     done: 'Done',
-    started: `${logged} of ${session.reps.length} sets`,
+    started: `${logged} of ${plural(session.reps.length, what)}`,
     todo: isNext ? 'Up next' : '',
   }[status];
   const open = ui.open === i;
+  const tag = session.kind === 'max' ? ', re-max' : isHeavyDay(session) ? ', heavy day' : '';
   return `<li class="session" data-status="${status}"${isNext ? ' data-next' : ''}>
     <button class="session-head" data-action="session" data-index="${i}" data-key="session-${i}" aria-expanded="${open}">
-      <span class="session-day">${session.day}${isHeavyDay(session) ? ', heavy day' : ''}</span>
+      <span class="session-day">${session.day}${tag}</span>
       <span class="session-lift">${liftOf(session).name}</span>
       <span class="session-state">${label}</span>
     </button>
@@ -323,40 +343,81 @@ function sessionView(b, session, i, isNext) {
   </li>`;
 }
 
+const skipButton = (session, i) => (sessionStatus(session) === 'done' ? ''
+  : `<button class="btn-quiet skip" data-action="skip" data-index="${i}" data-key="skip-${i}">Skip this day</button>`);
+
 function sessionBody(b, session, i) {
   if (session.skipped) {
     return `<div class="session-body">
-      <p class="hint">You skipped this day. It doesn't count toward your next increase.</p>
+      <p class="hint">You skipped this day. It doesn't count toward your next max.</p>
       <button class="btn-quiet" data-action="unskip" data-index="${i}" data-key="unskip-${i}">Undo skip</button>
     </div>`;
   }
+  if (session.kind === 'max') return remaxBody(b, session, i);
   const lift = liftOf(session);
   const p = prescription(session.kind, ui.week);
-  const work = workingMax(b.max[lift.id], state);
+  const max = weekMax(b, lift.id, ui.week, state);
+  const work = workingMax(max, state);
   const target = targetWeight(work, session.kind, ui.week, state.round);
   const shown = session.weight ?? target;
-  const ramp = warmups(work, shown, state.unit, state.round).map((s) => `, ${fmt(s.weight)} × ${s.reps}`).join('');
+  const single = singleWeight(b, session, ui.week, state);
+  const ramp = warmups(work, single ?? shown, state.unit, state.round).map((s) => `, ${fmt(s.weight)} × ${s.reps}`).join('');
+  const moved = max - b.max[lift.id];
+  const movedNote = moved && ui.week >= WAVE_TWO
+    ? `<p class="hint">${moved > 0 ? 'Up' : 'Down'} ${fmt(Math.abs(moved))} from ${fmt(b.max[lift.id])} after your week 3 test set.</p>` : '';
   return `<div class="session-body">
-    <p class="lift-scheme">${p.sets} × ${p.reps} at ${tidy(p.pct * 100)}% of ${fmt(work)}${state.trainingMax ? ' (training max)' : ''}</p>
+    <p class="lift-scheme">${p.sets} × ${p.reps} at ${tidy(p.pct * 100)}% of ${fmt(work)}${state.trainingMax ? ' (training max)' : ''}. Rest ${restText(restSeconds(session, ui.week, 1))} between sets.</p>
+    ${movedNote}
     <button class="lift-weight" data-action="weight" data-index="${i}" data-key="weight-${i}"
         aria-label="${lift.name}, ${fmt(shown)} ${state.unit}. Change weight">
       <span class="lift-num">${fmt(shown)}</span><span class="lift-unit">${state.unit}</span>
     </button>
-    ${session.weight !== null ? `<p class="lift-target">Target was ${fmt(target)}</p>` : ''}
+    ${session.weight !== null && session.weight !== target ? `<p class="lift-target">Target is ${fmt(target)}</p>` : ''}
     ${barbell(shown)}
     <p class="warmup">Warm-up: empty bar × 5–10${ramp}</p>
-    ${isHeavyDay(session) ? '<p class="hint">Heavy day: stop each set with about 2 reps left in the tank.</p>' : ''}
+    ${single ? `<p class="warmup">Then one heavy single: ${fmt(single)} × 1 at ${tidy(p.single * 100)}%. Rest 3 minutes before your sets.</p>` : ''}
+    ${isHeavyDay(session) ? '<p class="hint">Heavy day: stop each set with 2–4 reps left in the tank.</p>' : ''}
     <div class="sets" role="group" aria-label="${lift.name} sets">
       ${session.reps.map((r, s) => setLight(session, i, s, r)).join('')}
     </div>
-    ${sessionStatus(session) === 'done' ? '' : `<button class="btn-quiet skip" data-action="skip" data-index="${i}" data-key="skip-${i}">Skip this day</button>`}
+    ${skipButton(session, i)}
   </div>`;
 }
 
-function barbell(total) {
+// Re-max day: warm-ups built toward the opener, then three attempts judged like a meet.
+function remaxBody(b, session, i) {
+  const lift = liftOf(session);
+  const base = attemptBase(b, lift.id, state);
+  const weights = session.reps.map((_, a) => setWeight(b, session, ui.week, a, state));
+  const fromTest = base !== weekMax(b, lift.id, FINISH_WEEK - 1, state);
+  const ramp = warmups(base, weights[0], state.unit, state.round, REMAX_RAMP[lift.id === 'deadlift' ? 'deadlift' : 'lift'])
+    .map((s) => `, ${fmt(s.weight)} × ${s.reps}`).join('');
+  const next = session.reps.findIndex((r) => r === null);
+  const loading = next === -1 ? null : next;
+  const good = weights.filter((_, a) => session.reps[a] === 1);
+  const best = good.length ? Math.max(...good) : null;
+  const slow = roundTo(base, state.round);
+  const attempts = weights.map((w, a) => `<li class="attempt">
+      <span class="attempt-name">${ATTEMPT_NAMES[a]}<span class="attempt-pct">${tidy(ATTEMPTS[a] * 100)}%</span></span>
+      <button class="attempt-weight" data-action="weight" data-index="${i}" data-attempt="${a}" data-key="attempt-${i}-${a}"
+        aria-label="${ATTEMPT_NAMES[a]}, ${fmt(w)} ${state.unit}. Change weight">${fmt(w)}<span>${state.unit}</span></button>
+      ${attemptLight(session, i, a)}
+    </li>`).join('');
+  return `<div class="session-body">
+    <p class="lift-scheme">Attempts are built from ${fmt(base)}, ${fromTest ? 'the estimate from your week 6 test set' : 'your max'}. Rest ${restText(restSeconds(session, ui.week, 1))} before each attempt.</p>
+    <p class="warmup">Warm-up: empty bar × 5–10${ramp}. Rest 2–3 minutes between warm-ups.</p>
+    <ol class="attempts">${attempts}</ol>
+    ${loading !== null ? barbell(weights[loading], ATTEMPT_NAMES[loading]) : ''}
+    <p class="hint">Pick the third from how the second moved: fast, go for ${fmt(weights[2])}; slow, take about ${fmt(slow)}; a grind, stop there and mark the third a pass.</p>
+    ${best !== null ? `<p class="remax-best">Best good lift <strong>${fmt(best)}</strong> ${state.unit}</p>` : ''}
+    ${skipButton(session, i)}
+  </div>`;
+}
+
+function barbell(total, attempt) {
   const plates = platesPerSide(total, state.unit);
   const loaded = tidy(BAR[state.unit] + 2 * plates.reduce((sum, p) => sum + p, 0));
-  let caption = plates.length ? `Each side: ${plates.map(fmt).join(' + ')}` : 'Empty bar';
+  let caption = plates.length ? `${attempt ? `${attempt}, each side` : 'Each side'}: ${plates.map(fmt).join(' + ')}` : 'Empty bar';
   if (total < BAR[state.unit]) caption = 'Lighter than the empty bar';
   else if (loaded !== total) caption += `. Plates make ${fmt(loaded)}, not ${fmt(total)}`;
   const shapes = plates.map((p) => {
@@ -385,58 +446,84 @@ function setLight(session, index, i, reps) {
     aria-label="${label}">${text}</button>`;
 }
 
-function reviewReason(result) {
-  const skipped = result.skipped ? ` ${plural(result.skipped, 'day')} skipped, not counted.` : '';
-  if (result.performed === 0) return 'Nothing logged in weeks 1–3. Repeat at the same max.';
-  if (result.passed && !result.bump) {
-    // Only just making the target at 82.5% suggests the max is higher than today's real strength.
-    const tip = state.trainingMax ? '' : ' A 90% training max in Settings can help.';
-    return `Every rep hit, but only the target reps on your test set, so your max may be set too high. It stays the same.${tip}${skipped}`;
+function attemptLight(session, index, a) {
+  const r = session.reps[a];
+  const name = ATTEMPT_NAMES[a];
+  const [cls, text, label] = r === null ? ['set is-heavy', a + 1, `${name}, not judged`]
+    : r === 1 ? ['set is-good', '✓', `${name}, good lift`] : ['set is-short', '✕', `${name}, no lift`];
+  return `<button class="${cls}" data-action="set" data-index="${index}" data-set="${a}" data-key="set-${index}-${a}"
+    aria-label="${label}">${text}</button>`;
+}
+
+function reviewReason(r, liftId) {
+  const u = state.unit;
+  const skipped = r.skipped ? ` ${plural(r.skipped, 'day')} skipped, not counted.` : '';
+  const set = (t) => `${fmt(t.weight)} × ${t.reps}, an estimated max of ${fmt(Math.round(t.estimate))}`;
+  const max = block().max[liftId];
+  const wave = r.waveMax !== max ? `Your week 3 test set moved it to ${fmt(r.waveMax)} for weeks 4–8. ` : '';
+  switch (r.basis) {
+    case 'remax':
+      return `Re-max: ${fmt(r.best)} ${u}${r.change > 0 ? `, up ${fmt(r.change)}` : r.change < 0 ? `, ${fmt(-r.change)} under your old max` : ', the same as your old max'}. That's your new max.`;
+    case 'remax-off-day':
+      return `Your best single, ${fmt(r.best)}, was well under the ${fmt(Math.round(r.second.estimate))} your week 6 test set estimated, so this meets in the middle. Call it an off day.`;
+    case 'remax-missed':
+      return `No good lift on re-max day, so this is 95% of ${r.second ? 'your week 6 estimate' : `your weeks 4–8 max, ${fmt(r.waveMax)}`}. Retest next block.`;
+    case 'test-raise':
+      return `${wave}Week 6 test set: ${set(r.second)}. Add ${fmt(tidy(r.suggested - r.waveMax))}.${skipped}`;
+    case 'test-hold':
+      return `${wave}Week 6 test set: ${set(r.second)}. That's close to your max, so it stays.${skipped}`;
+    case 'test-lower':
+      return `${wave}Week 6 test set: ${set(r.second)}. That's well under your max, so it drops 5%: training from a max you can hit beats grinding.${skipped}`;
+    case 'missed':
+      return `${wave}No week 6 test set, and reps came up short on two or more days in weeks 4–6, so it drops 5%.${skipped}`;
+    case 'clean':
+      return `${wave}No week 6 test set, but every rep in weeks 4–6 was hit. Add ${fmt(BUMPS[u][liftId][0])}.${skipped}`;
+    default:
+      if (r.performed === 0) return 'Nothing logged this block. Repeat at the same max.';
+      return `${wave}No week 6 test set${r.misses.some((m) => m.week >= WAVE_TWO) ? ', and one day in weeks 4–6 came up short' : ''}, so it stays.${skipped}`;
   }
-  if (result.passed) {
-    const extra = result.extra ? `, plus ${plural(result.extra, 'extra rep')} on your test set` : '';
-    return `Every rep hit${extra}. Add ${fmt(result.bump)} ${state.unit}.${skipped}`;
-  }
-  const misses = result.misses.map((m) => {
-    const parts = [];
-    if (m.short) parts.push(`${plural(m.short, 'set')} short`);
-    if (m.unlogged) parts.push(`${plural(m.unlogged, 'set')} not logged`);
-    return `Week ${m.week + 1} ${m.day}: ${parts.join(' and ')}.`;
-  });
-  return `${misses.join(' ')} Repeat at the same max.${skipped}`;
 }
 
 function reviewView() {
   const b = block();
   const n = state.blocks.length;
-  const deloadDone = b.deload && b.log[DELOAD_WEEK].some((s) => s.reps.some((r) => r !== null));
   return `<header class="top">
       <button class="btn-quiet back" data-action="review-back">Back to week ${b.log.length}</button>
       <h1 class="display">Finish block ${n}</h1>
     </header>
     <p class="lede">These are your maxes for block ${n + 1}. Change any number before you start.</p>
-    ${deloadDone ? '<p class="hint">You just had a deload, so this is a good time to retest your maxes. If you do, enter the new numbers below.</p>' : ''}
     <form class="review" id="review-form" novalidate>
       ${LIFTS.map((l) => {
-        const result = evaluateLift(b, l.id, state.unit);
+        const result = evaluateLift(b, l.id, state);
         return `<section class="review-lift">
           <h2 class="lift-name">${l.name}</h2>
-          <p class="review-why${result.bump ? '' : ' is-held'}">${reviewReason(result)}</p>
+          <p class="review-why${result.change > 0 ? '' : ' is-held'}">${reviewReason(result, l.id)}</p>
           ${maxField({ ...l, name: `New max, was ${fmt(b.max[l.id])}` }, fmt(result.suggested))}
         </section>`;
       }).join('')}
-      <section class="review-lift">
-        <label class="check">
-          <input type="checkbox" name="deload"${b.deload ? '' : ' checked'}>
-          <span>End block ${n + 1} with a deload week</span>
-        </label>
-        <p class="hint">Deload every second block, or sooner if your lifts stall, joints ache or sleep slips.</p>
-      </section>
+      <fieldset class="review-lift">
+        <legend class="setting-title">Week 8 of block ${n + 1}</legend>
+        ${segmented('finish', [{ value: 'remax', label: 'Re-max' }, { value: 'deload', label: 'Deload' }], finishFor(n))}
+        <p class="hint">Re-max every second block. Deload sooner if your lifts stall, joints ache or sleep slips.</p>
+      </fieldset>
       <button class="btn btn-wide" type="submit">Start block ${n + 1}</button>
     </form>`;
 }
 
+function chartWidth() {
+  const style = getComputedStyle(view);
+  return Math.floor(view.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
+}
+
 function historyView() {
+  const lift = LIFTS.find((l) => l.id === ui.lift);
+  const name = lift.short.toLowerCase();
+  const weeks = liftHistory(state, lift.id);
+  chartWeeks = weeks;
+  const width = chartWidth();
+  const tested = weeks.filter((w) => w.tests.length);
+  const lifted = weeks.filter((w) => w.volume > 0);
+  const latest = weeks[weeks.length - 1].max;
   const total = (b) => tidy(LIFTS.reduce((sum, l) => sum + b.max[l.id], 0));
   const cell = (value, prev) => {
     const delta = prev === undefined || value === prev ? '' : `<span class="h-delta">${value > prev ? '+' : ''}${fmt(value - prev)}</span>`;
@@ -450,19 +537,53 @@ function historyView() {
       ${cell(total(b), prev && total(prev))}
     </tr>`;
   }).reverse().join('');
+  const weekRows = weeks.filter((w) => w.volume > 0 || w.tests.length).map((w) => `<tr>
+      <th scope="row"><span class="h-date">Block ${w.block + 1}, week ${w.week + 1}</span></th>
+      <td>${fmt(w.max)}</td>
+      <td>${Math.round(w.volume).toLocaleString()}</td>
+      <td>${w.tests.map((t) => fmt(Math.round(t.value))).join(', ') || '–'}</td>
+    </tr>`).reverse().join('');
   return `<header class="top"><h1 class="display">History</h1></header>
-    <p class="lede">The maxes each block was built on. Total is squat, bench and deadlift added together.</p>
+    <fieldset class="lift-pick" aria-label="Lift">${segmented('lift', LIFTS.map((l) => ({ value: l.id, label: l.short })), lift.id)}</fieldset>
+    <section class="chart-block">
+      <h2 class="chart-title">${lift.short} max</h2>
+      <p class="chart-legend"><span><i class="key-line"></i>Max you trained from</span><span><i class="key-dot"></i>Tested</span></p>
+      <figure class="chart" data-chart="max" data-key="chart-max" tabindex="0"
+          aria-label="${lift.short} max by week, now ${fmt(latest)} ${state.unit}${tested.length ? `, ${plural(tested.length, 'tested result')}` : ''}. Use the arrow keys to read each week.">
+        ${maxChart(weeks, width)}
+        <div class="chart-tip" hidden></div>
+      </figure>
+      <p class="hint">${tested.length ? 'Dots are estimates from your test sets (the 2+ sets) and re-max singles. Tap a week for its numbers.' : 'Dots appear here after your week 3 test sets: the max each one estimates.'}</p>
+    </section>
+    <section class="chart-block">
+      <h2 class="chart-title">Weekly volume</h2>
+      <p class="chart-legend">Weight × reps for every ${name} set you logged, in ${state.unit}.</p>
+      ${lifted.length ? `<figure class="chart" data-chart="volume" data-key="chart-volume" tabindex="0"
+          aria-label="Weekly ${name} volume, ${plural(lifted.length, 'week')} logged. Use the arrow keys to read each week.">
+        ${volumeChart(weeks, width)}
+        <div class="chart-tip" hidden></div>
+      </figure>` : `<p class="chart-empty">Log a ${name} set to see your weekly volume.</p>`}
+    </section>
+    ${weekRows ? `<details class="chart-table">
+      <summary class="btn-quiet">Show ${name} week by week</summary>
+      <table class="history weeks">
+        <thead><tr><th scope="col">Week</th><th scope="col">Max</th><th scope="col">Volume</th><th scope="col">Tested</th></tr></thead>
+        <tbody>${weekRows}</tbody>
+      </table>
+    </details>` : ''}
+    <h2 class="chart-title history-title">Maxes by block</h2>
+    <p class="hint">The maxes each block started from. Total is squat, bench and deadlift added together.</p>
     <table class="history">
       <thead><tr><th scope="col">Block</th>${LIFTS.map((l) => `<th scope="col">${l.short}</th>`).join('')}<th scope="col">Total</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table>
-    ${state.blocks.length === 1 ? '<p class="hint">Finish block 1 to see your maxes climb here.</p>' : ''}`;
+    </table>`;
 }
 
 function settingsView() {
   const b = block();
   const roundOptions = ROUNDING[state.unit].map((r) => ({ value: String(r), label: `${fmt(r)} ${state.unit}` }));
   const maxOptions = [{ value: 'false', label: 'Full max' }, { value: 'true', label: '90% training max' }];
+  const restOptions = [{ value: 'sound', label: 'Sound' }, { value: 'silent', label: 'Silent' }, { value: 'off', label: 'Off' }];
   return `<header class="top"><h1 class="display">Settings</h1></header>
     <fieldset class="setting">
       <legend class="setting-title">Units</legend>
@@ -478,6 +599,11 @@ function settingsView() {
       <legend class="setting-title">Work from</legend>
       ${segmented('trainingMax', maxOptions, String(state.trainingMax))}
       <p class="hint">Switch to a 90% training max if your max was a grind, or your 2+ sets start coming up short.</p>
+    </fieldset>
+    <fieldset class="setting">
+      <legend class="setting-title">Rest timer</legend>
+      ${segmented('rest', restOptions, state.rest)}
+      <p class="hint">Starts when you log a set, timed for the lift and the weight: longer for heavier sets and deadlifts. The screen stays on while it runs, and the bar turns white when rest is over. Beeps only play with the app open and the ring switch off silent.</p>
     </fieldset>
     <section class="setting">
       <h2 class="setting-title">Current maxes</h2>
@@ -507,48 +633,157 @@ function settingsView() {
     </section>`;
 }
 
+// ---------- Chart taps ----------
+
+function tipContent(kind, w) {
+  const el = (tag, cls, text) => Object.assign(document.createElement(tag), cls ? { className: cls } : {}, text === undefined ? {} : { textContent: text });
+  const row = (key, value, label) => {
+    const r = el('div', 'tip-row');
+    r.append(el('i', key), el('strong', '', value), el('span', '', label));
+    return r;
+  };
+  const title = el('div', 'tip-title', `Block ${w.block + 1}, week ${w.week + 1}`);
+  if (kind === 'volume') return [title, row('key-line', Math.round(w.volume).toLocaleString(), `${state.unit}, ${plural(w.reps, 'rep')}`)];
+  return [title, row('key-line', fmt(w.max), 'max'),
+    ...w.tests.map((t) => row('key-dot', fmt(Math.round(t.value)), t.kind === 'remax' ? 're-max' : `from ${fmt(t.weight)} × ${t.reps}`))];
+}
+
+function showTip(figure, index) {
+  const hit = figure.querySelector('.chart-hit');
+  const x = Number(hit.dataset.left) + Number(hit.dataset.slot) * (index + 0.5);
+  const cross = figure.querySelector('.chart-cross');
+  cross.setAttribute('x1', x);
+  cross.setAttribute('x2', x);
+  cross.setAttribute('visibility', 'visible');
+  const tip = figure.querySelector('.chart-tip');
+  tip.replaceChildren(...tipContent(figure.dataset.chart, chartWeeks[index]));
+  tip.hidden = false;
+  // Beside the crosshair, on whichever side has room.
+  const left = x > figure.clientWidth / 2 ? x - tip.offsetWidth - 12 : x + 12;
+  tip.style.left = `${Math.max(0, Math.min(left, figure.clientWidth - tip.offsetWidth))}px`;
+  figure.dataset.index = index;
+}
+
+function hideTip(figure) {
+  figure.querySelector('.chart-tip').hidden = true;
+  figure.querySelector('.chart-cross').setAttribute('visibility', 'hidden');
+  delete figure.dataset.index;
+}
+
+function chartPointer(e) {
+  const figure = e.target.closest?.('.chart');
+  for (const f of view.querySelectorAll('.chart')) if (f !== figure && f.dataset.index !== undefined) hideTip(f);
+  if (!figure) return;
+  const hit = figure.querySelector('.chart-hit');
+  const x = e.clientX - figure.querySelector('svg').getBoundingClientRect().left;
+  const index = Math.floor((x - Number(hit.dataset.left)) / Number(hit.dataset.slot));
+  showTip(figure, Math.min(Number(hit.dataset.n) - 1, Math.max(0, index)));
+}
+
+// The latest week with anything logged, so keyboard reading starts where the lifter is.
+function latestIndex() {
+  for (let i = chartWeeks.length - 1; i >= 0; i--) if (chartWeeks[i].volume || chartWeeks[i].tests.length) return i;
+  return 0;
+}
+
 // ---------- Sheets ----------
 
 const sessionAt = (index) => block().log[ui.week][index];
 
+function nextLabel(session, next) {
+  const weight = `${fmt(setWeight(block(), session, ui.week, next, state))} ${state.unit}`;
+  if (session.kind === 'max') return `Next: ${ATTEMPT_NAMES[next].toLowerCase()} attempt, ${weight}`;
+  const test = isTestSet(session, ui.week, next) ? ', as many reps as you can' : '';
+  return `Next: set ${next + 1} of ${session.reps.length}, ${weight}${test}`;
+}
+
+// A newly logged set starts the rest before the next one; the day's last set ends any rest under way.
 function logSet(session, set, reps) {
+  const fresh = session.reps[set] === null && reps !== null;
+  if (reps !== null) {
+    // Records the weight lifted, so a later change to settings or maxes never rewrites what was done.
+    const lifted = setWeight(block(), session, ui.week, set, state);
+    if (session.kind === 'max') session.weights[set] ??= lifted;
+    else session.weight ??= lifted;
+    block().lastTrained = todayISO();
+  }
   session.reps[set] = reps;
-  if (reps !== null) block().lastTrained = todayISO();
   save();
+  if (!fresh) return;
+  const next = session.reps.findIndex((r) => r === null);
+  if (next === -1) rest.stop();
+  else rest.start(restSeconds(session, ui.week, next), nextLabel(session, next));
+}
+
+// What a test set just told you about your max.
+function testNews(session) {
+  const b = block();
+  const lift = liftOf(session);
+  if (ui.week === FIRST_TEST) {
+    const was = b.max[lift.id];
+    const next = weekMax(b, lift.id, WAVE_TWO, state);
+    if (next === was) return `${lift.short} max stays at ${fmt(was)} for weeks 4–8.`;
+    return `${lift.short} max for weeks 4–8: ${fmt(next)}, ${next > was ? 'up' : 'down'} ${fmt(Math.abs(next - was))}.`;
+  }
+  const last = session.reps.length - 1;
+  const estimate = Math.round(estimateMax(setWeight(b, session, ui.week, last, state), session.reps[last]));
+  return `Estimated ${lift.short.toLowerCase()} max: ${estimate}. ${b.finish === 'remax' ? 'Your re-max attempts build from it.' : 'It sets your next block’s max.'}`;
 }
 
 function openReps(index, set) {
   const session = sessionAt(index);
-  const target = prescription(session.kind, ui.week).reps;
-  const test = isTestSet(session, ui.week, set);
   const current = session.reps[set];
   ui.sheet = { index, set };
-  document.getElementById('reps-title').textContent = `${liftOf(session).name}, set ${set + 1}`;
-  document.getElementById('reps-note').textContent = test
-    ? `Target ${target}. Count every clean rep you got.`
-    : `Target ${plural(target, 'rep')}. How many did you get?`;
-  // Test sets can run long, so they get a wider range.
-  document.getElementById('rep-grid').innerHTML = Array.from({ length: target + (test ? 11 : 6) }, (_, n) => `
-    <button class="rep${n === target ? ' is-target' : ''}" data-action="reps-pick" data-reps="${n}"
-      aria-pressed="${n === current}">${n}</button>`).join('');
+  repGrid.classList.toggle('is-judging', session.kind === 'max');
+  if (session.kind === 'max') {
+    const weight = setWeight(block(), session, ui.week, set, state);
+    document.getElementById('reps-title').textContent = `${liftOf(session).name}, ${ATTEMPT_NAMES[set].toLowerCase()}`;
+    document.getElementById('reps-note').textContent = `${fmt(weight)} ${state.unit}. Mark a pass as no lift.`;
+    repGrid.innerHTML = [[1, 'Good lift'], [0, 'No lift']].map(([n, text]) => `
+      <button class="rep" data-action="reps-pick" data-reps="${n}" aria-pressed="${n === current}">${text}</button>`).join('');
+  } else {
+    const target = prescription(session.kind, ui.week).reps;
+    const test = isTestSet(session, ui.week, set);
+    document.getElementById('reps-title').textContent = `${liftOf(session).name}, set ${set + 1}`;
+    document.getElementById('reps-note').textContent = test
+      ? `Target ${target}. Count every clean rep you got.`
+      : `Target ${plural(target, 'rep')}. How many did you get?`;
+    // Test sets can run long, so they get a wider range.
+    repGrid.innerHTML = Array.from({ length: target + (test ? 11 : 6) }, (_, n) => `
+      <button class="rep${n === target ? ' is-target' : ''}" data-action="reps-pick" data-reps="${n}"
+        aria-pressed="${n === current}">${n}</button>`).join('');
+  }
   repsSheet.showModal();
 }
 
-function openWeight(index) {
+function openWeight(index, attempt) {
   const session = sessionAt(index);
   const lift = liftOf(session);
-  const target = targetWeight(workingMax(block().max[lift.id], state), session.kind, ui.week, state.round);
-  ui.sheet = { index, target };
-  document.getElementById('weight-title').textContent = `${lift.name}, ${session.day}`;
-  document.getElementById('weight-note').textContent = `Target ${fmt(target)} ${state.unit}. Change it if you loaded something different.`;
+  const b = block();
+  const target = attempt === undefined
+    ? targetWeight(workingMax(weekMax(b, lift.id, ui.week, state), state), session.kind, ui.week, state.round)
+    : attemptWeight(b, lift.id, attempt, state);
+  const current = attempt === undefined ? session.weight : session.weights[attempt];
+  ui.sheet = { index, attempt, target };
+  document.getElementById('weight-title').textContent = attempt === undefined
+    ? `${lift.name}, ${session.day}` : `${lift.name}, ${ATTEMPT_NAMES[attempt].toLowerCase()}`;
+  document.getElementById('weight-note').textContent = attempt === undefined
+    ? `Target ${fmt(target)} ${state.unit}. Change it if you loaded something different.`
+    : `Suggested ${fmt(target)} ${state.unit}. Change it to the weight you'll take.`;
   document.getElementById('weight-unit').textContent = state.unit;
-  weightInput.value = fmt(session.weight ?? target);
+  weightInput.value = fmt(current ?? target);
   weightSheet.showModal();
 }
 
+// The target is stored as "no change" until something is logged; after that the weight is a record.
 function saveWeight(value) {
   const session = sessionAt(ui.sheet.index);
-  session.weight = value === null || value === ui.sheet.target ? null : tidy(value);
+  const { attempt, target } = ui.sheet;
+  const logged = attempt === undefined ? session.reps.some((r) => r !== null) : session.reps[attempt] !== null;
+  const weight = value ?? target;
+  const kept = weight === target && !logged ? null : weight;
+  if (attempt === undefined) session.weight = kept;
+  else session.weights[attempt] = kept;
   save();
   weightSheet.close();
   render();
@@ -596,6 +831,7 @@ async function restore(file) {
   state = data;
   save();
   requestPersist();
+  rest.setMode(state.rest);
   Object.assign(ui, { tab: 'train', reviewing: false, week: null, open: undefined });
   render();
   scrollTop();
@@ -609,9 +845,9 @@ function readMaxes(form, previous) {
   const max = {};
   for (const l of LIFTS) {
     const raw = form.elements[l.id].value;
-    const v = parseFloat(raw);
+    const v = tidy(parseFloat(raw));
     if (!(v > 0)) return null;
-    max[l.id] = previous && raw === fmt(previous[l.id]) ? previous[l.id] : tidy(v);
+    max[l.id] = previous && raw === fmt(previous[l.id]) ? previous[l.id] : v;
   }
   return max;
 }
@@ -620,7 +856,7 @@ const FORMS = {
   'setup-form'(form) {
     const max = readMaxes(form);
     if (!max) return toast('Enter a max above 0 for all three lifts.');
-    state.blocks.push(newBlock(max, todayISO()));
+    state.blocks.push(newBlock(max, todayISO(), finishFor(0)));
     save();
     requestPersist();
     Object.assign(ui, { week: 0, open: undefined });
@@ -629,12 +865,13 @@ const FORMS = {
   },
   'review-form'(form) {
     const b = block();
-    const suggested = Object.fromEntries(LIFTS.map((l) => [l.id, evaluateLift(b, l.id, state.unit).suggested]));
+    const suggested = Object.fromEntries(LIFTS.map((l) => [l.id, evaluateLift(b, l.id, state).suggested]));
     const max = readMaxes(form, suggested);
     if (!max) return toast('Enter a max above 0 for all three lifts.');
     b.finished = todayISO();
-    state.blocks.push(newBlock(max, todayISO(), { deload: form.elements.deload.checked }));
+    state.blocks.push(newBlock(max, todayISO(), form.elements.finish.value));
     save();
+    rest.stop();
     Object.assign(ui, { reviewing: false, week: 0, open: undefined });
     render();
     scrollTop();
@@ -660,6 +897,7 @@ const FORMS = {
       state = saved;
       writeLocal();
       requestPersist();
+      rest.setMode(state.rest);
       Object.assign(ui, { tab: 'train', reviewing: false, week: null, open: undefined });
       render();
       scrollTop();
@@ -706,6 +944,7 @@ const ACTIONS = {
   skip(el) {
     sessionAt(Number(el.dataset.index)).skipped = true;
     save();
+    rest.stop();
     ui.open = defaultOpen(block(), ui.week);
     render();
   },
@@ -717,11 +956,12 @@ const ACTIONS = {
     render();
   },
   set(el) {
+    rest.prime();
     const index = Number(el.dataset.index);
     const i = Number(el.dataset.set);
     const session = sessionAt(index);
-    // One tap logs a normal set at target; the test set always asks how many reps.
-    if (session.reps[i] === null && !isTestSet(session, ui.week, i)) {
+    // One tap logs a normal set at target; test sets and re-max attempts always ask.
+    if (session.reps[i] === null && session.kind !== 'max' && !isTestSet(session, ui.week, i)) {
       logSet(session, i, prescription(session.kind, ui.week).reps);
       render();
     } else {
@@ -729,9 +969,12 @@ const ACTIONS = {
     }
   },
   'reps-pick'(el) {
-    logSet(sessionAt(ui.sheet.index), ui.sheet.set, Number(el.dataset.reps));
+    rest.prime();
+    const session = sessionAt(ui.sheet.index);
+    logSet(session, ui.sheet.set, Number(el.dataset.reps));
     repsSheet.close();
     render();
+    if (isTestSet(session, ui.week, ui.sheet.set)) toast(testNews(session));
   },
   'reps-clear'() {
     logSet(sessionAt(ui.sheet.index), ui.sheet.set, null);
@@ -742,29 +985,25 @@ const ACTIONS = {
     el.closest('dialog').close();
   },
   weight(el) {
-    openWeight(Number(el.dataset.index));
+    openWeight(Number(el.dataset.index), el.dataset.attempt === undefined ? undefined : Number(el.dataset.attempt));
   },
   'weight-save'() {
-    const v = parseFloat(weightInput.value);
+    // Checked after rounding: a weight that rounds to 0 would make the saved log fail its check on the next load.
+    const v = tidy(parseFloat(weightInput.value));
     if (!(v > 0)) return toast('Enter a weight above 0.');
     saveWeight(v);
   },
   'weight-reset'() {
     saveWeight(null);
   },
-  'add-deload'() {
-    setDeload(block(), true);
+  'switch-finish'() {
+    const b = block();
+    const to = b.finish === 'remax' ? 'deload' : 'remax';
+    if (!setFinish(b, to)) return toast("You've already logged part of week 8, so it stays as it is.");
     save();
-    Object.assign(ui, { week: DELOAD_WEEK, open: undefined });
+    ui.open = undefined;
     render();
-    toast('Deload week added to this block.');
-  },
-  'remove-deload'() {
-    if (!setDeload(block(), false)) return toast("You've already logged part of the deload week, so it stays.");
-    save();
-    Object.assign(ui, { week: null, open: undefined });
-    render();
-    toast('Deload week removed.');
+    toast(to === 'remax' ? 'Week 8 is now a re-max.' : 'Week 8 is now a deload.');
   },
   'repeat-week'(el) {
     const w = Number(el.dataset.week);
@@ -778,6 +1017,7 @@ const ACTIONS = {
     if (!confirm("Clear this block's logged sets and start again at week 1? Your maxes stay the same.")) return;
     restartBlock(block());
     save();
+    rest.stop();
     Object.assign(ui, { week: 0, open: undefined });
     render();
     scrollTop();
@@ -796,6 +1036,12 @@ const ACTIONS = {
     ui.reviewing = false;
     render();
   },
+  'rest-add'() {
+    rest.add(30);
+  },
+  'rest-stop'() {
+    rest.stop();
+  },
   backup() {
     backup();
   },
@@ -813,10 +1059,11 @@ const ACTIONS = {
   },
   erase() {
     if (!confirm("Erase every block on this phone? This can't be undone.")) return;
-    state = { ...emptyState(state.unit), round: state.round, trainingMax: state.trainingMax };
+    state = { ...emptyState(state.unit), round: state.round, trainingMax: state.trainingMax, rest: state.rest };
     // Disconnect first so the empty log never overwrites the copy on GitHub.
     sync.disconnect();
     writeLocal();
+    rest.stop();
     Object.assign(ui, { tab: 'train', reviewing: false, week: null, open: undefined });
     render();
     scrollTop();
@@ -862,7 +1109,44 @@ document.addEventListener('change', (e) => {
     state.trainingMax = value === 'true';
     save();
     render();
+  } else if (name === 'rest') {
+    state.rest = value;
+    rest.setMode(value);
+    save();
+  } else if (name === 'lift') {
+    ui.lift = value;
+    render();
   }
+});
+
+document.addEventListener('pointerdown', chartPointer);
+document.addEventListener('pointermove', (e) => {
+  // A finger drags the crosshair; a mouse only needs to hover.
+  if (e.pointerType === 'mouse' || e.buttons) chartPointer(e);
+});
+
+document.addEventListener('keydown', (e) => {
+  const figure = e.target.closest?.('.chart');
+  if (!figure) return;
+  if (e.key === 'Escape') return hideTip(figure);
+  const n = chartWeeks.length;
+  const at = figure.dataset.index === undefined ? latestIndex() : Number(figure.dataset.index);
+  const moves = { ArrowLeft: at - 1, ArrowRight: at + 1, Home: 0, End: n - 1 };
+  if (!(e.key in moves)) return;
+  e.preventDefault();
+  showTip(figure, Math.min(n - 1, Math.max(0, moves[e.key])));
+});
+
+// Focus from the keyboard shows the latest week; a tap already placed the crosshair before focus lands.
+document.addEventListener('focusin', (e) => {
+  if (e.target.matches?.('.chart') && e.target.dataset.index === undefined) showTip(e.target, latestIndex());
+});
+
+let lastWidth = window.innerWidth;
+window.addEventListener('resize', () => {
+  if (window.innerWidth === lastWidth) return;
+  lastWidth = window.innerWidth;
+  if (ui.tab === 'history' && state.blocks.length) render();
 });
 
 weightInput.addEventListener('keydown', (e) => {
@@ -879,6 +1163,8 @@ restoreInput.addEventListener('change', () => {
 
 render();
 if (state.blocks.length) requestPersist();
+rest.setMode(state.rest);
+rest.resume();
 
 // Warns once per rejected key; a successful save or reconnect re-arms the warning.
 let keyWarned = false;

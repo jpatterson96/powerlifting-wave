@@ -1,5 +1,5 @@
 // Bump the version whenever any file changes so phones pick up the new copy.
-const CACHE = 'wave-v3';
+const CACHE = 'wave-v4';
 const FILES = [
   './',
   'index.html',
@@ -7,6 +7,8 @@ const FILES = [
   'app.js',
   'logic.js',
   'sync.js',
+  'rest.js',
+  'charts.js',
   'manifest.webmanifest',
   'fonts/big-shoulders-display.woff2',
   'icons/apple-touch-icon.png',

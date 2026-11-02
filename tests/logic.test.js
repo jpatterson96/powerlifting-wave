@@ -1,36 +1,47 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PLAN, DELOAD, TEST_WEEK, prescription, roundTo, targetWeight, workingMax, platesPerSide, warmups, newBlock,
-  setDeload, sessionStatus, weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak,
-  restartBlock, evaluateLift, convertState, isValidState, upgrade, emptyState,
+  WEEKS, ATTEMPTS, FIRST_TEST, SECOND_TEST, FINISH_WEEK, prescription, roundTo, targetWeight, workingMax, platesPerSide,
+  warmups, REMAX_RAMP, estimateMax, adjustMax, weekMax, attemptWeight, setWeight, singleWeight, restSeconds, newBlock,
+  setFinish, finishFor, sessionStatus, weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak,
+  restartBlock, evaluateLift, liftHistory, convertState, isValidState, upgrade, emptyState,
 } from '../logic.js';
 
 const MAX = { squat: 405, bench: 285, deadlift: 495 };
+const LB = { unit: 'lb', round: 5, trainingMax: false };
 
-const dayIndex = (block, day) => block.log[0].findIndex((s) => s.day === day);
+const dayIndex = (block, day, week = 0) => block.log[week].findIndex((s) => s.day === day);
+const base = (block, week, lift) => block.log[week].find((s) => s.lift === lift && s.kind === 'base');
 
-// Logs every day in weeks 1-3 at target reps, then sets each week 3 test set to `testReps`.
-function cleanBlock(testReps = 2, opts = {}) {
-  const b = newBlock(MAX, '2026-11-02', opts);
-  for (let w = 0; w < 3; w++) {
+// Logs every training day in weeks 1-7 at target reps; test sets get `first` and `second` reps.
+function cleanBlock({ first = 6, second = 5, finish = 'deload' } = {}) {
+  const b = newBlock(MAX, '2026-11-02', finish);
+  for (let w = 0; w < FINISH_WEEK; w++) {
     for (const s of b.log[w]) s.reps = Array(s.reps.length).fill(prescription(s.kind, w).reps);
   }
-  for (const s of b.log[TEST_WEEK]) if (s.kind === 'base') s.reps[s.reps.length - 1] = testReps;
+  for (const [week, reps] of [[FIRST_TEST, first], [SECOND_TEST, second]]) {
+    for (const s of b.log[week]) if (s.kind === 'base') s.reps[s.reps.length - 1] = reps;
+  }
   return b;
 }
 
-test('target weights follow the template days and the heavier repeat days', () => {
+test('target weights follow both waves, the taper and the deload finish', () => {
   assert.equal(targetWeight(405, 'base', 0, 5), 285); // 70%: 283.5
   assert.equal(targetWeight(405, 'base', 1, 5), 305); // 75%: 303.75
   assert.equal(targetWeight(405, 'base', 2, 5), 335); // 82.5%: 334.125
   assert.equal(targetWeight(405, 'heavy', 0, 5), 315); // 77.5%: 313.875
-  assert.equal(targetWeight(405, 'heavy', 1, 5), 335); // 82.5%
   assert.equal(targetWeight(405, 'heavy', 2, 5), 355); // 87.5%: 354.375
-  assert.equal(targetWeight(405, 'base', 3, 5), 245); // deload 60%: 243
-  assert.equal(targetWeight(285, 'base', 0, 5), 200); // 199.5
+  assert.equal(targetWeight(405, 'base', 3, 5), 305); // wave 2, 75%
+  assert.equal(targetWeight(405, 'base', 4, 5), 325); // 80%
+  assert.equal(targetWeight(405, 'base', 5, 5), 345); // 85%: 344.25
+  assert.equal(targetWeight(405, 'heavy', 5, 5), 375); // 92.5%: 374.6
+  assert.equal(targetWeight(405, 'base', 6, 5), 325); // taper doubles at 80%
+  assert.equal(targetWeight(405, 'heavy', 7, 5), 245); // deload 60%: 243
   assert.equal(roundTo(201.2, 2.5), 200);
   assert.equal(roundTo(201.3, 2.5), 202.5);
+  const b = newBlock(MAX, '2026-11-02');
+  assert.equal(singleWeight(b, base(b, 6, 'squat'), 6, LB), 365); // 90%: 364.5
+  assert.equal(singleWeight(b, b.log[6][3], 6, LB), null);
 });
 
 test('a training max takes 90% of the real max', () => {
@@ -50,36 +61,42 @@ test('plates per side are greedy from the heaviest plate', () => {
 test('warm-ups ramp up and stay below the working weight', () => {
   assert.deepEqual(warmups(405, 285, 'lb', 5), [{ weight: 205, reps: '5' }, { weight: 255, reps: '3' }]);
   assert.deepEqual(warmups(405, 355, 'lb', 5).map((s) => s.weight), [205, 255, 305, 345]);
-  assert.deepEqual(warmups(405, 245, 'lb', 5).map((s) => s.weight), [205]);
   assert.deepEqual(warmups(80, 60, 'lb', 5), [{ weight: 50, reps: '3' }]); // 40 is lighter than the bar
   assert.deepEqual(warmups(80, 45, 'lb', 5), []); // working on the empty bar
   // 75% of 285 rounds to 215, too close to the 220 working weight to be its own set.
   assert.deepEqual(warmups(285, 220, 'lb', 5).map((s) => s.weight), [145, 180]);
+  // Re-max: two singles before the opener, one for deadlift.
+  assert.deepEqual(warmups(385, 350, 'lb', 5, REMAX_RAMP.lift).map((s) => s.weight), [155, 230, 270, 310, 335]);
+  assert.deepEqual(warmups(455, 415, 'lb', 5, REMAX_RAMP.deadlift).map((s) => s.weight), [180, 275, 320, 365]);
 });
 
-test('each week follows the Mon-Fri schedule; Thursday and Friday are the heavy days', () => {
+test('a block is 8 weeks on the Mon-Fri schedule; week 8 is a re-max or a deload', () => {
   const b = newBlock(MAX, '2026-11-02');
   assert.deepEqual(b.log[0].map((s) => `${s.day} ${s.lift} ${s.kind}`), [
     'Monday bench base', 'Tuesday squat base', 'Wednesday deadlift base', 'Thursday bench heavy', 'Friday squat heavy',
   ]);
-  assert.equal(b.log.length, 3);
-  assert.deepEqual(b.log.map((week) => week[0].reps.length), [3, 4, 5]);
-  assert.deepEqual(b.log.map((week) => week[3].reps.length), [3, 4, 3]);
+  assert.equal(b.log.length, 8);
+  assert.deepEqual(b.log.map((week) => week[0].reps.length), [3, 4, 5, 3, 4, 4, 2, 3]);
+  assert.deepEqual(b.log.slice(0, 7).map((week) => week[3].reps.length), [3, 4, 3, 3, 4, 3, 3]);
+  assert.equal(b.finish, 'remax');
+  assert.deepEqual(b.log[7].map((s) => `${s.day} ${s.kind}`), ['Monday max', 'Tuesday max', 'Wednesday max']);
+  assert.deepEqual(b.log[7][0].weights, [null, null, null]);
+  const d = newBlock(MAX, '2026-11-02', 'deload');
+  assert.deepEqual(d.log[7].map((s) => s.reps.length), [2, 2, 2, 2, 2]);
+  assert.deepEqual([0, 1, 2, 3].map(finishFor), ['remax', 'deload', 'remax', 'deload']);
 });
 
-test('the deload week can be added, and removed only before it is used', () => {
+test('week 8 switches between re-max and deload only before it is used', () => {
   const b = newBlock(MAX, '2026-11-02');
-  assert.equal(setDeload(b, true), true);
-  assert.equal(b.log.length, 4);
-  assert.deepEqual(b.log[3].map((s) => s.reps.length), [2, 2, 2, 2, 2]);
-  b.log[3][0].reps[0] = 5;
-  assert.equal(setDeload(b, false), false);
-  assert.equal(b.log.length, 4);
-  b.log[3][0].reps[0] = null;
-  assert.equal(setDeload(b, false), true);
-  assert.equal(b.log.length, 3);
-  assert.equal(newBlock(MAX, '2026-11-02', { deload: true }).log.length, 4);
-  assert.equal(DELOAD.pct, 0.6);
+  assert.equal(setFinish(b, 'deload'), true);
+  assert.equal(b.log[7].length, 5);
+  b.log[7][0].reps[0] = 5;
+  assert.equal(setFinish(b, 'remax'), false);
+  assert.equal(b.finish, 'deload');
+  b.log[7][0].reps[0] = null;
+  assert.equal(setFinish(b, 'remax'), true);
+  b.log[7][1].weights[2] = 400;
+  assert.equal(setFinish(b, 'deload'), false);
 });
 
 test('next session waits on a missed day until it is done or skipped', () => {
@@ -92,8 +109,10 @@ test('next session waits on a missed day until it is done or skipped', () => {
   assert.deepEqual(nextSession(b), { week: 0, index: 1 });
   assert.equal(weekProgress(b, 0), 1 / 5);
   const done = cleanBlock();
+  assert.deepEqual(nextSession(done), { week: 7, index: 0 });
+  for (const s of done.log[7]) s.skipped = true;
   assert.equal(nextSession(done), null);
-  assert.equal(currentWeek(done), 2);
+  assert.equal(currentWeek(done), 7);
 });
 
 test('skipping most of a week offers to repeat it before the next week starts', () => {
@@ -105,11 +124,6 @@ test('skipping most of a week offers to repeat it before the next week starts', 
   resetWeek(b, 0);
   assert.equal(sessionStatus(b.log[0][2]), 'todo');
   assert.equal(weekToRepeat(b), null);
-
-  const two = newBlock(MAX, '2026-11-02');
-  for (const i of [0, 1, 2]) two.log[0][i].reps.fill(6);
-  for (const i of [3, 4]) two.log[0][i].skipped = true;
-  assert.equal(weekToRepeat(two), null); // 2 of 5 skipped is not most of the week
 });
 
 test('two weeks off offers a restart at week 1, once per break', () => {
@@ -123,73 +137,165 @@ test('two weeks off offers a restart at week 1, once per break', () => {
   b.breakSeen = null;
   restartBlock(b);
   assert.deepEqual(nextSession(b), { week: 0, index: 0 });
-  assert.equal(longBreak(b, '2026-11-20'), 0);
+  assert.equal(b.log[7].length, 5); // the deload finish stays a deload
 });
 
-test('increase scales with the best extra reps on a week 3 test set', () => {
-  // Only the target reps: the max is likely too high, so it holds even though every rep was hit.
-  const flat = evaluateLift(cleanBlock(2), 'squat', 'lb');
-  assert.equal(flat.passed, true);
-  assert.equal(flat.tested, true);
-  assert.equal(flat.suggested, 405);
-  assert.equal(evaluateLift(cleanBlock(3), 'squat', 'lb').suggested, 410);
-  assert.equal(evaluateLift(cleanBlock(4), 'squat', 'lb').suggested, 412.5);
-  assert.equal(evaluateLift(cleanBlock(5), 'squat', 'lb').suggested, 415);
-  assert.equal(evaluateLift(cleanBlock(9), 'deadlift', 'lb').suggested, 505);
-  assert.equal(evaluateLift(cleanBlock(3), 'bench', 'lb').suggested, 287.5);
-  assert.equal(evaluateLift(cleanBlock(4), 'bench', 'lb').suggested, 288.75);
-
-  // No test set logged (that day skipped): the template's low step applies.
-  const untested = cleanBlock(2);
-  untested.log[TEST_WEEK][dayIndex(untested, 'Wednesday')].skipped = true;
-  assert.equal(evaluateLift(untested, 'deadlift', 'lb').tested, false);
-  assert.equal(evaluateLift(untested, 'deadlift', 'lb').suggested, 500);
-
-  // Heavy-day sets aren't test sets, so extra reps there don't change the increase.
-  const heavyExtra = cleanBlock(2);
-  heavyExtra.log[TEST_WEEK][dayIndex(heavyExtra, 'Thursday')].reps[2] = 5;
-  assert.equal(evaluateLift(heavyExtra, 'bench', 'lb').extra, 0);
+test('test-set reps move a max: down 5%, held, or up the low, middle or top step', () => {
+  const squat = (week, pct) => {
+    const w = roundTo(385 * pct, 5);
+    return (reps) => adjustMax(385, estimateMax(w, reps), 'squat', LB).value;
+  };
+  const w3 = squat(FIRST_TEST, 0.825); // 320
+  assert.deepEqual([2, 4, 5, 6, 7, 8, 9].map(w3), [365, 365, 385, 385, 390, 392.5, 395]);
+  const w6 = squat(SECOND_TEST, 0.85); // 325
+  assert.deepEqual([3, 4, 5, 6, 7, 8].map(w6), [365, 385, 385, 390, 392.5, 395]);
+  assert.equal(adjustMax(315, estimateMax(260, 7), 'bench', LB).value, 317.5);
+  assert.equal(estimateMax(320, 7), 389.333); // Epley 394.67, Brzycki 384
 });
 
-test('a short set on any trained day holds the max; skipped days are left out', () => {
-  const short = cleanBlock(4);
-  short.log[1][dayIndex(short, 'Thursday')].reps[2] = 2;
-  const r = evaluateLift(short, 'bench', 'lb');
-  assert.equal(r.passed, false);
-  assert.equal(r.suggested, 285);
-  assert.deepEqual(r.misses, [{ week: 1, day: 'Thursday', short: 1, unlogged: 0 }]);
+test('the week 3 test set sets the max for weeks 4-8', () => {
+  const b = newBlock(MAX, '2026-11-02');
+  const tue = base(b, FIRST_TEST, 'squat');
+  assert.equal(weekMax(b, 'squat', 4, LB), 405);
+  tue.reps = [2, 2, 2, 2, 8]; // 335 x 8 at a 405 max: estimate ~414, +7.5
+  assert.equal(weekMax(b, 'squat', 2, LB), 405);
+  assert.equal(weekMax(b, 'squat', 3, LB), 412.5);
+  assert.equal(setWeight(b, base(b, 3, 'squat'), 3, 0, LB), 310); // 75% of 412.5: 309.4
+  tue.reps = [2, 2, 2, 2, 3];
+  assert.equal(weekMax(b, 'squat', 5, LB), 385); // 95% of 405: 384.75
+  tue.skipped = true;
+  assert.equal(weekMax(b, 'squat', 5, LB), 405);
+});
 
-  const skipped = cleanBlock(3);
-  skipped.log[0][dayIndex(skipped, 'Friday')].skipped = true;
-  skipped.log[1][dayIndex(skipped, 'Tuesday')].reps.fill(null);
-  const s = evaluateLift(skipped, 'squat', 'lb');
-  assert.equal(s.passed, true);
+test('re-max attempts build from the week 6 estimate and can be changed', () => {
+  const b = newBlock({ squat: 385, bench: 315, deadlift: 455 }, '2026-11-02');
+  assert.deepEqual([0, 1, 2].map((a) => attemptWeight(b, 'squat', a, LB)), [350, 370, 395]);
+  assert.deepEqual([0, 1, 2].map((a) => attemptWeight(b, 'bench', a, LB)), [285, 300, 320]);
+  // Built from the max, attempts ignore a training max: the point is to test the real one.
+  assert.equal(attemptWeight(b, 'squat', 0, { ...LB, trainingMax: true }), 350);
+  base(b, SECOND_TEST, 'squat').reps = [2, 2, 2, 8]; // 325 x 8: estimate 407.6
+  assert.deepEqual([0, 1, 2].map((a) => attemptWeight(b, 'squat', a, LB)), [370, 390, 415]);
+  const tue = b.log[7][1];
+  tue.weights[2] = 400;
+  assert.equal(setWeight(b, tue, 7, 2, LB), 400);
+  assert.equal(ATTEMPTS.length, 3);
+});
+
+test('rest depends on the lift and the load, and is longest before tests and attempts', () => {
+  const b = newBlock(MAX, '2026-11-02');
+  const at = (week, day) => b.log[week][dayIndex(b, day, week)];
+  assert.equal(restSeconds(at(0, 'Monday'), 0, 1), 120); // bench 70%
+  assert.equal(restSeconds(at(0, 'Tuesday'), 0, 1), 150); // squat 70%
+  assert.equal(restSeconds(at(0, 'Wednesday'), 0, 1), 180); // deadlift 70%
+  assert.equal(restSeconds(at(1, 'Tuesday'), 1, 1), 180); // squat 75%
+  assert.equal(restSeconds(at(0, 'Thursday'), 0, 1), 150); // bench 77.5%
+  assert.equal(restSeconds(at(5, 'Wednesday'), 5, 1), 240); // deadlift 85%
+  assert.equal(restSeconds(at(5, 'Friday'), 5, 1), 240); // squat 92.5%
+  assert.equal(restSeconds(at(2, 'Tuesday'), 2, 4), 300); // before the squat test set
+  assert.equal(restSeconds(at(2, 'Monday'), 2, 4), 240); // before the bench test set
+  assert.equal(restSeconds(at(7, 'Monday'), 7, 1), 240); // bench attempts
+  const d = newBlock(MAX, '2026-11-02', 'deload');
+  assert.equal(restSeconds(d.log[7][0], 7, 1), 90); // bench deload
+});
+
+test('a good re-max single is the next max, unless it is an off day', () => {
+  const b = cleanBlock({ first: 6, second: 4, finish: 'remax' });
+  const mon = b.log[7][0];
+  mon.reps = [1, 1, 0];
+  const r = evaluateLift(b, 'bench', LB);
+  assert.equal(r.basis, 'remax');
+  assert.equal(r.suggested, setWeight(b, mon, 7, 1, LB));
+  mon.weights = [225, 235, 300]; // 235 is more than 5% under the 266.9 the week 6 set (240 x 4) estimated
+  const off = evaluateLift(b, 'bench', LB);
+  assert.equal(off.basis, 'remax-off-day');
+  assert.equal(off.suggested, 250); // halfway: 250.95
+  mon.reps = [0, 0, 0];
+  const missed = evaluateLift(b, 'bench', LB);
+  assert.equal(missed.basis, 'remax-missed');
+  assert.equal(missed.suggested, roundTo(missed.second.estimate * 0.95, 5));
+});
+
+test('without a re-max, the week 6 test set moves the second-wave max', () => {
+  // Week 3 at 6 reps holds 405; week 6 at 345 x 8 estimates ~431, the top step.
+  const up = evaluateLift(cleanBlock({ first: 6, second: 8 }), 'squat', LB);
+  assert.equal(up.basis, 'test-raise');
+  assert.equal(up.suggested, 415);
+  assert.equal(evaluateLift(cleanBlock({ first: 6, second: 5 }), 'squat', LB).suggested, 405);
+  const down = evaluateLift(cleanBlock({ first: 6, second: 2 }), 'squat', LB);
+  assert.equal(down.basis, 'test-lower');
+  assert.equal(down.suggested, 385);
+  // Week 3 at 9 reps: 405 -> 415 for weeks 4-8; week 6 then holds 415.
+  const both = evaluateLift(cleanBlock({ first: 9, second: 5 }), 'squat', LB);
+  assert.equal(both.waveMax, 415);
+  assert.equal(both.suggested, 415);
+  // Heavy-day sets aren't test sets, so extra reps there change nothing.
+  const heavy = cleanBlock({ first: 6, second: 5 });
+  heavy.log[SECOND_TEST][dayIndex(heavy, 'Thursday', SECOND_TEST)].reps[2] = 5;
+  assert.equal(evaluateLift(heavy, 'bench', LB).suggested, 285);
+});
+
+test('with no test at all, weeks 4-6 decide: clean adds a step, misses hold or lower', () => {
+  const untested = () => {
+    const b = cleanBlock({ first: 6, second: 5 });
+    base(b, SECOND_TEST, 'deadlift').skipped = true;
+    return b;
+  };
+  const clean = evaluateLift(untested(), 'deadlift', LB);
+  assert.equal(clean.basis, 'clean');
+  assert.equal(clean.suggested, 500);
+  const one = untested();
+  base(one, 4, 'deadlift').reps[0] = 1;
+  assert.equal(evaluateLift(one, 'deadlift', LB).basis, 'hold');
+  assert.equal(evaluateLift(one, 'deadlift', LB).suggested, 495);
+  base(one, 3, 'deadlift').reps[2] = 2;
+  assert.equal(evaluateLift(one, 'deadlift', LB).basis, 'missed');
+  assert.equal(evaluateLift(one, 'deadlift', LB).suggested, 470); // 95%: 470.25
+  // Skipped days are left out rather than counted as misses.
+  const skipped = untested();
+  base(skipped, 3, 'deadlift').skipped = true;
+  const s = evaluateLift(skipped, 'deadlift', LB);
   assert.equal(s.skipped, 2);
-  assert.equal(s.suggested, 410);
-
-  const nothing = newBlock(MAX, '2026-11-02');
-  assert.equal(evaluateLift(nothing, 'deadlift', 'lb').performed, 0);
-  assert.equal(evaluateLift(nothing, 'deadlift', 'lb').passed, false);
-
-  // The deload week never counts.
-  const deload = cleanBlock(2, { deload: true });
-  deload.log[3][0].reps = [1, 1];
-  assert.equal(evaluateLift(deload, 'bench', 'lb').passed, true);
+  assert.equal(s.basis, 'clean');
+  const nothing = evaluateLift(newBlock(MAX, '2026-11-02'), 'deadlift', LB);
+  assert.equal(nothing.performed, 0);
+  assert.equal(nothing.suggested, 495);
 });
 
-test('unit conversion round-trips and resets rounding', () => {
-  const b = cleanBlock();
+test('lift history adds up weekly volume and tested results', () => {
+  const b = newBlock({ squat: 385, bench: 315, deadlift: 455 }, '2026-11-02');
+  const mon = b.log[0][0];
+  mon.reps = [6, 6, 7];
+  mon.weight = 225;
+  b.log[0][3].reps = [4, 4, null]; // Thursday: 77.5% of 315 = 245
+  base(b, FIRST_TEST, 'bench').reps = [2, 2, 2, 2, 7]; // 260 x 7
+  b.log[7][0].reps = [1, 1, 0];
+  const weeks = liftHistory({ ...LB, blocks: [b] }, 'bench');
+  assert.equal(weeks.length, 8);
+  assert.equal(weeks[0].volume, 225 * 19 + 245 * 8);
+  assert.equal(weeks[0].reps, 27);
+  assert.deepEqual(weeks[2].tests, [{ value: estimateMax(260, 7), weight: 260, reps: 7, kind: 'estimate' }]);
+  assert.equal(weeks[3].max, 317.5); // moved by the week 3 test set
+  assert.equal(weeks[7].tests[0].kind, 'remax');
+  assert.equal(weeks[7].tests[0].value, setWeight(b, b.log[7][0], 7, 1, LB));
+  assert.equal(weeks[7].volume, setWeight(b, b.log[7][0], 7, 0, LB) + setWeight(b, b.log[7][0], 7, 1, LB));
+});
+
+test('unit conversion round-trips, attempt weights included, and resets rounding', () => {
+  const b = cleanBlock({ finish: 'remax' });
   b.log[0][0].weight = 280;
+  b.log[7][0].weights = [250, null, 300];
   const kg = convertState({ ...emptyState(), blocks: [b] }, 'kg');
   assert.equal(kg.round, 2.5);
   assert.equal(Math.round(kg.blocks[0].max.squat * 10) / 10, 183.7);
   assert.equal(Math.round(kg.blocks[0].log[0][0].weight * 10) / 10, 127);
+  assert.equal(kg.blocks[0].log[7][0].weights[1], null);
   const back = convertState(kg, 'lb');
   for (const [id, v] of Object.entries(b.max)) assert.ok(Math.abs(back.blocks[0].max[id] - v) < 1e-9);
+  assert.ok(Math.abs(back.blocks[0].log[7][0].weights[2] - 300) < 1e-9);
 });
 
 test('saved data validation accepts real data and rejects malformed data', () => {
-  const good = { ...emptyState(), blocks: [cleanBlock(), cleanBlock(2, { deload: true })] };
+  const good = { ...emptyState(), blocks: [cleanBlock(), cleanBlock({ finish: 'remax' })] };
   assert.equal(isValidState(good), true);
   assert.equal(isValidState(JSON.parse(JSON.stringify(good))), true);
   const copy = () => JSON.parse(JSON.stringify(good));
@@ -199,34 +305,65 @@ test('saved data validation accepts real data and rejects malformed data', () =>
   const badDay = copy();
   badDay.blocks[0].log[0][0].day = '<img src=x>';
   assert.equal(isValidState(badDay), false);
-  const badDeload = copy();
-  badDeload.blocks[0].deload = true;
-  assert.equal(isValidState(badDeload), false);
-  const noTm = copy();
-  delete noTm.trainingMax;
-  assert.equal(isValidState(noTm), false);
+  const badFinish = copy();
+  badFinish.blocks[0].finish = 'remax';
+  assert.equal(isValidState(badFinish), false);
+  const badAttempt = copy();
+  badAttempt.blocks[1].log[7][0].reps[0] = 2;
+  assert.equal(isValidState(badAttempt), false);
+  const noRest = copy();
+  delete noRest.rest;
+  assert.equal(isValidState(noRest), false);
   assert.equal(isValidState(null), false);
+  assert.equal(WEEKS.length, 8);
 });
 
-test('first-release data moves each lift onto its template day and keeps the deload', () => {
+test('a 3-week log from the last release carries into the 8-week block', () => {
+  const sets = { base: [3, 4, 5], heavy: [3, 4, 3] };
+  const days = [['Monday', 'bench', 'base'], ['Tuesday', 'squat', 'base'], ['Wednesday', 'deadlift', 'base'], ['Thursday', 'bench', 'heavy'], ['Friday', 'squat', 'heavy']];
+  const log = [0, 1, 2].map((w) => days.map(([day, lift, kind]) => ({ day, lift, kind, reps: Array(sets[kind][w]).fill(null), weight: null, skipped: false })));
+  log[0][0].reps = [6, 6, 7];
+  log[0][0].weight = 225;
+  const v2 = { v: 2, unit: 'lb', round: 5, trainingMax: false, blocks: [
+    { started: '2026-11-02', finished: null, deload: false, lastTrained: '2026-11-02', breakSeen: null, max: { squat: 385, bench: 315, deadlift: 455 }, log },
+  ] };
+  const v3 = upgrade(JSON.parse(JSON.stringify(v2)));
+  assert.equal(isValidState(v3), true);
+  const b = v3.blocks[0];
+  assert.equal(b.log.length, 8);
+  assert.equal(b.finish, 'remax');
+  assert.equal(b.lastTrained, '2026-11-02');
+  assert.deepEqual(b.log[0][0].reps, [6, 6, 7]);
+  assert.equal(b.log[0][0].weight, 225);
+  assert.deepEqual(nextSession(b), { week: 0, index: 1 });
+  assert.equal(v3.rest, 'sound');
+
+  // A finished block with a deload keeps weeks 1-3 and counts the rest as skipped.
+  const done = JSON.parse(JSON.stringify(v2));
+  done.blocks[0].finished = '2026-11-23';
+  done.blocks[0].deload = true;
+  done.blocks[0].log.push(days.map(([day, lift, kind]) => ({ day, lift, kind, reps: [5, 5], weight: null, skipped: false })));
+  const old = upgrade(done).blocks[0];
+  assert.equal(sessionStatus(old.log[3][0]), 'skipped');
+  assert.equal(sessionStatus(old.log[7][0]), 'skipped');
+});
+
+test('first-release data moves each lift onto its template day', () => {
   const v1Log = [3, 4, 5, 2].map((sets, w) => ({
     squat: { reps: Array(sets).fill(w === 0 ? 6 : null), weight: null },
     bench: { reps: Array(sets).fill(null), weight: w === 0 ? 200 : null },
     deadlift: { reps: Array(sets).fill(null), weight: null },
   }));
   const v1 = { v: 1, unit: 'lb', round: 5, blocks: [{ started: '2026-11-02', finished: null, max: MAX, log: v1Log }] };
-  const v2 = upgrade(v1);
-  assert.equal(isValidState(v2), true);
-  const b = v2.blocks[0];
-  assert.equal(b.deload, true);
+  const v3 = upgrade(v1);
+  assert.equal(isValidState(v3), true);
+  const b = v3.blocks[0];
   assert.deepEqual(b.log[0][dayIndex(b, 'Tuesday')].reps, [6, 6, 6]);
-  assert.deepEqual(b.log[0][dayIndex(b, 'Friday')].reps, [null, null, null]);
   assert.equal(b.log[0][dayIndex(b, 'Monday')].weight, 200);
   // Heavy days in the week already under way count as skipped, so the log resumes where it was.
   assert.equal(sessionStatus(b.log[0][dayIndex(b, 'Thursday')]), 'skipped');
   assert.equal(sessionStatus(b.log[1][dayIndex(b, 'Thursday')]), 'todo');
   assert.deepEqual(nextSession(b), { week: 0, index: dayIndex(b, 'Monday') });
   assert.equal(upgrade({ nope: 1 }), null);
-  assert.equal(upgrade(v2), v2);
-  assert.equal(PLAN.heavy[2].pct, 0.875);
+  assert.equal(upgrade(v3), v3);
 });

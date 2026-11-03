@@ -150,6 +150,22 @@ main {
   font-weight: 600;
 }
 
+/* An outlined button: the workout clock's Start and End, which should stand out from the quiet text buttons. */
+.btn-line {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1.5px solid var(--chalk);
+  border-radius: 12px;
+  background: none;
+  color: var(--chalk);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.btn-line:active {
+  transform: scale(0.98);
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -717,10 +733,7 @@ legend.setting-title + * {
 
 /* The workout clock under the day's name: Start workout, then the time running, then how long it took. */
 .day-start {
-  min-height: 36px;
-  margin: -8px 0 10px;
-  padding: 0;
-  color: var(--chalk);
+  margin: 0 0 18px;
 }
 
 .day-time {
@@ -1255,6 +1268,7 @@ legend.setting-title + * {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
+  align-items: center;
   gap: 4px 18px;
   margin-top: 8px;
 }

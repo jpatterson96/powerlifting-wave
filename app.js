@@ -426,7 +426,7 @@ function dayPanel(b, session, i, isNext) {
 function dayTiming(session, i) {
   if (!session.started) {
     if (['done', 'skipped'].includes(sessionStatus(session))) return '';
-    return `<button class="btn-quiet day-start" data-action="workout-start" data-index="${i}" data-key="start-${i}">Start workout</button>`;
+    return `<button class="btn-line day-start" data-action="workout-start" data-index="${i}" data-key="start-${i}">Start workout</button>`;
   }
   if (!session.ended) {
     return `<p class="day-time">Started ${clockTime(session.started)}, <span class="day-elapsed" data-start="${session.started}">${spanText(Date.now() - Date.parse(session.started))}</span> so far.</p>`;
@@ -514,7 +514,7 @@ function extrasSection(session, i) {
   const open = openGroup(session, groups);
   // A started day ends with End workout, which also skips whatever is left; otherwise Skip the rest does just that.
   const end = session.started && !session.ended
-    ? `<button class="btn-quiet" data-action="workout-end" data-index="${i}" data-key="workout-end-${i}">End workout</button>`
+    ? `<button class="btn-line" data-action="workout-end" data-index="${i}" data-key="workout-end-${i}">End workout</button>`
     : groups.flat().some((e) => !isFinished(entryOf(session, e.id)))
       ? `<button class="btn-quiet" data-action="extra-finish" data-index="${i}" data-key="extra-finish-${i}">Skip the rest</button>` : '';
   return `<section class="extras" aria-label="Accessories">

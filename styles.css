@@ -1671,7 +1671,7 @@ legend.setting-title + * {
   inset: auto 0 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   padding: 0 max(8px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(8px, env(safe-area-inset-left));
   border-top: 1px solid var(--line);
   background: rgba(20, 32, 46, 0.94);
@@ -1994,6 +1994,118 @@ legend.setting-title + * {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* ---------- PRs: the three records, each on a loaded bar ---------- */
+
+.total {
+  margin-top: 16px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.total-num {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 12px;
+  font: 800 min(108px, 28vw)/0.9 var(--display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+}
+
+.total-unit {
+  color: var(--muted);
+  font: 600 22px var(--display);
+  letter-spacing: 0;
+}
+
+.pr-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pr {
+  padding: 24px 0 26px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pr-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pr-lift {
+  font: 700 26px/1 var(--display);
+}
+
+.pr-date {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pr-num {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+  font: 800 72px/0.9 var(--display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.pr-unit {
+  color: var(--muted);
+  font: 600 20px var(--display);
+  letter-spacing: 0;
+}
+
+.bar-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 10px;
+  overflow: visible;
+}
+
+/* Plates slide onto the bar from the ends, one after another, when the page opens. */
+.bar-plate {
+  transform-box: fill-box;
+  animation: plate-load 420ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  animation-delay: calc(var(--k) * 55ms + 80ms);
+}
+
+@keyframes plate-load {
+  from {
+    transform: translateX(var(--from));
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar-plate {
+    animation: none;
+  }
+}
+
+.pr-plates {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pr-gain {
+  margin-top: 4px;
+  color: var(--gain);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- Sets per muscle ---------- */

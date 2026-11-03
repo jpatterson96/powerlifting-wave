@@ -145,6 +145,58 @@ export function maxChanges(state, liftId) {
   return sorted.map((c, i) => ({ ...c, change: i ? c.value - sorted[i - 1].value : 0 }));
 }
 
+// ---------- Records ----------
+
+const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+// Every max lift of one kind, oldest first, with the day it was done: maxes from before the app, the max the
+// first block started from (the one the lifter typed in) and good re-max attempts. A later block starts from
+// the review's number, which may be an estimate, and test-set estimates aren't lifts either.
+export function maxLifts(state, liftId) {
+  const lifts = (state.pastMaxes ?? []).filter((p) => p.lift === liftId).map((p) => ({ value: p.value, date: p.date, kind: 'past' }));
+  state.blocks.forEach((b, i) => {
+    if (i === 0) lifts.push({ value: b.max[liftId], date: b.maxDates?.[liftId] ?? b.started, kind: 'start' });
+    for (const s of b.log[FINISH_WEEK]) {
+      if (s.lift !== liftId || s.kind !== 'max' || s.skipped) continue;
+      s.reps.forEach((r, a) => {
+        if (r === 1) lifts.push({ value: setWeight(b, s, FINISH_WEEK, a, state), date: s.date ?? b.started, kind: 'remax' });
+      });
+    }
+  });
+  return lifts.sort(byDate);
+}
+
+// The heaviest lift of one kind and the day it was first done, with the best before that day.
+export function liftRecord(state, liftId) {
+  const lifts = maxLifts(state, liftId);
+  if (!lifts.length) return null;
+  const top = Math.max(...lifts.map((l) => l.value));
+  const record = lifts.find((l) => l.value === top);
+  const earlier = lifts.filter((l) => l.date < record.date);
+  const previous = earlier.length ? earlier.reduce((best, l) => (l.value > best.value ? l : best)) : null;
+  return { ...record, previous };
+}
+
+// The total (the three records added up) each time it rose, oldest first, from the first day all three
+// lifts had one.
+export function totalHistory(state) {
+  const best = {};
+  const events = LIFTS.flatMap((l) => maxLifts(state, l.id).map((x) => ({ ...x, lift: l.id }))).sort(byDate);
+  const out = [];
+  for (const e of events) {
+    if (!(best[e.lift] >= e.value)) best[e.lift] = e.value;
+    if (LIFTS.some((l) => best[l.id] === undefined)) continue;
+    const total = tidy(LIFTS.reduce((sum, l) => sum + best[l.id], 0));
+    const last = out[out.length - 1];
+    if (!last) out.push({ date: e.date, total });
+    else if (total > last.total) {
+      if (last.date === e.date) last.total = total;
+      else out.push({ date: e.date, total });
+    }
+  }
+  return out;
+}
+
 // Re-max attempts build from the week 6 estimate when there is one, else the second-wave max. The real
 // max either way, even with a training max on: the point is to test it.
 export function attemptBase(block, liftId, state) {

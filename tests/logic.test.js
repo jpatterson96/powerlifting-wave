@@ -4,7 +4,7 @@ import {
   WEEKS, ATTEMPTS, FIRST_TEST, SECOND_TEST, FINISH_WEEK, prescription, roundTo, targetWeight, workingMax, platesPerSide,
   warmups, REMAX_RAMP, estimateMax, adjustMax, weekMax, attemptWeight, setWeight, singleWeight, restSeconds, newBlock,
   setFinish, finishFor, sessionStatus, weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak,
-  restartBlock, evaluateLift, liftHistory, maxChanges, convertState, isValidState, upgrade, emptyState,
+  restartBlock, evaluateLift, liftHistory, maxChanges, liftRecord, totalHistory, convertState, isValidState, upgrade, emptyState,
 } from '../logic.js';
 
 const MAX = { squat: 405, bench: 285, deadlift: 495 };
@@ -190,6 +190,32 @@ test('each max is dated: the block start, then the day of a week 3 test set that
   assert.deepEqual(maxChanges(state, 'squat').map((c) => [c.date, c.value, c.change, Boolean(c.past)]), [
     ['2024-05-01', 335, 0, true], ['2025-03-01', 365, 30, true], ['2026-09-20', 405, 40, false], ['2026-12-28', 425, 20, false]]);
   assert.equal(convertState(state, 'kg').pastMaxes[0].value, 365 / 2.20462);
+});
+
+test('records are lifts: earlier maxes, the first maxes entered and good re-max attempts', () => {
+  const state = {
+    ...LB,
+    pastMaxes: [{ date: '2019-11-09', lift: 'squat', value: 340 }, { date: '2024-01-05', lift: 'squat', value: 405 },
+      { date: '2019-12-12', lift: 'bench', value: 235 }, { date: '2019-11-04', lift: 'deadlift', value: 405 }],
+    blocks: [newBlock(MAX, '2026-11-02')],
+  };
+  state.blocks[0].maxDates = { squat: '2026-09-20' };
+  // 405 was lifted twice: the record is the first time, and the best before it is the previous record.
+  let r = liftRecord(state, 'squat');
+  assert.deepEqual([r.value, r.date, r.kind, r.previous.value, r.previous.date], [405, '2024-01-05', 'past', 340, '2019-11-09']);
+  assert.equal(liftRecord(state, 'bench').previous.value, 235);
+  assert.equal(liftRecord(state, 'deadlift').previous.value, 405);
+  // Good re-max attempts count; a miss and the max the next block starts from don't.
+  const tue = state.blocks[0].log[FINISH_WEEK][1];
+  assert.equal(tue.lift, 'squat');
+  Object.assign(tue, { date: '2026-12-22', weights: [380, 410, 425], reps: [1, 1, 0] });
+  state.blocks.push(newBlock({ ...MAX, squat: 440 }, '2026-12-28'));
+  r = liftRecord(state, 'squat');
+  assert.deepEqual([r.value, r.date, r.kind, r.previous.value], [410, '2026-12-22', 'remax', 405]);
+  // The total exists from the first day all three lifts had one, and rises with each record.
+  assert.deepEqual(totalHistory(state), [
+    { date: '2019-12-12', total: 980 }, { date: '2024-01-05', total: 1045 }, { date: '2026-11-02', total: 1185 }, { date: '2026-12-22', total: 1190 },
+  ]);
 });
 
 test('re-max attempts build from the week 6 estimate and can be changed', () => {

@@ -18,6 +18,14 @@
 </head>
 <body>
   <main id="view"></main>
+  <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
+    <defs>
+      <linearGradient id="bar-steel" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#d7dee5"/>
+        <stop offset="1" stop-color="#7d8a97"/>
+      </linearGradient>
+    </defs>
+  </svg>
 
   <aside class="rest" id="rest" aria-label="Rest timer" hidden>
     <span class="rest-track" aria-hidden="true"><span class="rest-fill" id="rest-fill"></span></span>
@@ -30,6 +38,7 @@
 
   <nav class="tabs" id="tabs" aria-label="Sections" hidden>
     <button class="tab" data-action="tab" data-tab="train">Train</button>
+    <button class="tab" data-action="tab" data-tab="prs">PRs</button>
     <button class="tab" data-action="tab" data-tab="history">History</button>
     <button class="tab" data-action="tab" data-tab="settings">Settings</button>
   </nav>
@@ -86,7 +95,7 @@
   <dialog class="sheet" id="past-sheet" aria-labelledby="past-title">
     <form class="sheet-body" id="past-form" novalidate>
       <h2 class="sheet-title" id="past-title">Add an earlier max</h2>
-      <p class="sheet-note">A max from before you used the app, so History shows your progress over the years.</p>
+      <p class="sheet-note">A max from before you used the app, or one you hit outside the program, so History and PRs have it.</p>
       <label class="field">
         <span class="field-label">Lift</span>
         <span class="field-row"><select class="text-input select-input" name="lift" id="past-lift"></select></span>

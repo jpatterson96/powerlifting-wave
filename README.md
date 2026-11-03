@@ -126,6 +126,14 @@ Once a day's lift and accessories are all done or skipped, a summary closes the 
 
 Apple Health isn't reachable from a web app, so body weight is logged in the app (History → Body).
 
+## PRs
+
+The PRs tab shows your best squat, bench and deadlift, each loaded on a bar with the plates per side,
+and the three added up as your total, with how far it has come since your first one. A record is a lift
+you did: the maxes you entered when you started, maxes added in History → Lifts (with the day you hit
+them), and good re-max attempts. Estimates from "2+" sets don't count, and neither does the max a later
+block starts from, since that's the review's number.
+
 ## History
 
 **Lifts**: pick a lift to see two charts that share one week-by-week axis across every block:

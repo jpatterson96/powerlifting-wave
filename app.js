@@ -3,7 +3,7 @@ import {
   prescription, ROUNDING, REST_MODES, BAR, tidy, roundTo, workingMax, targetWeight, estimateMax, weekMax, attemptBase, attemptWeight, setWeight,
   singleWeight, restSeconds, platesPerSide, warmups, emptyState, newBlock, finishFor, setFinish, sessionStatus,
   weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak, restartBlock, evaluateLift, liftHistory,
-  maxChanges, convertState, upgrade,
+  maxChanges, liftRecord, totalHistory, convertState, upgrade,
 } from './logic.js';
 import {
   WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, isLightWeek, plannedSets, newExercise, dayExtras, dayGroups,
@@ -157,6 +157,7 @@ function render() {
       t.setAttribute('aria-current', t.dataset.tab === ui.tab ? 'page' : 'false');
     }
     if (ui.tab === 'history') view.innerHTML = historyView();
+    else if (ui.tab === 'prs') view.innerHTML = prsView();
     else if (ui.tab === 'settings') view.innerHTML = settingsView();
     else view.innerHTML = ui.reviewing ? reviewView() : trainView();
   }
@@ -700,6 +701,79 @@ function barbell(total, attempt) {
   </figure>`;
 }
 
+// ---------- PRs ----------
+
+const big = (n) => (Math.round(n * 100) / 100).toLocaleString();
+
+// How much sleeve a stack of plates takes: the shoulder, each plate with its gap, and the collar.
+const stackWidth = (plates) => 12 + plates.reduce((sum, p) => sum + PLATE_STYLE[state.unit][p][2] + 2, 0) + 5;
+
+// A loaded barbell seen from the side, plates on both sleeves. `sleeve` is shared by a page's bars so the
+// plates are the same size on each. They slide on when the page opens.
+function loadedBar(plates, sleeve) {
+  const H = 76;
+  const mid = H / 2;
+  const shaft = 150;
+  const W = shaft + 2 * sleeve;
+  const side = (dir) => {
+    const shoulder = dir < 0 ? sleeve : sleeve + shaft;
+    const parts = [`<rect x="${dir < 0 ? shoulder - 7 : shoulder}" y="${mid - 9}" width="7" height="18" rx="1.5" fill="var(--chrome)"/>`];
+    let x = shoulder + dir * 12;
+    plates.forEach((p, k) => {
+      const [colour, h, w] = PLATE_STYLE[state.unit][p];
+      const fill = colour === 'chrome' ? 'var(--chrome)' : `var(--plate-${colour})`;
+      parts.push(`<rect class="bar-plate" style="--k:${k};--from:${dir * 40}px" x="${dir < 0 ? x - w : x}" y="${mid - h / 2}" width="${w}" height="${h}" rx="1.5" fill="${fill}" stroke="rgba(0,0,0,0.3)"/>`);
+      x += dir * (w + 2);
+    });
+    parts.push(`<rect class="bar-plate" style="--k:${plates.length};--from:${dir * 40}px" x="${dir < 0 ? x - 5 : x}" y="${mid - 11}" width="5" height="22" rx="1" fill="var(--chrome)"/>`);
+    return parts.join('');
+  };
+  return `<svg class="bar-svg" viewBox="0 0 ${W} ${H}" aria-hidden="true">
+    <rect x="0" y="${mid - 4.5}" width="${sleeve}" height="9" rx="2" fill="url(#bar-steel)"/>
+    <rect x="${sleeve + shaft}" y="${mid - 4.5}" width="${sleeve}" height="9" rx="2" fill="url(#bar-steel)"/>
+    <rect x="${sleeve}" y="${mid - 3.5}" width="${shaft}" height="7" fill="url(#bar-steel)"/>
+    <rect x="${sleeve + 10}" y="${mid - 3.5}" width="${shaft * 0.3}" height="7" fill="rgba(0,0,0,0.18)"/>
+    <rect x="${sleeve + shaft * 0.7 - 10}" y="${mid - 3.5}" width="${shaft * 0.3}" height="7" fill="rgba(0,0,0,0.18)"/>
+    ${side(-1)}${side(1)}
+  </svg>`;
+}
+
+// The three records, each loaded on a bar, and the total they add up to.
+function prsView() {
+  const records = LIFTS.map((l) => ({ l, r: liftRecord(state, l.id) })).filter(({ r }) => r);
+  const stacks = records.map(({ r }) => platesPerSide(r.value, state.unit));
+  const sleeve = Math.max(100, ...stacks.map((p) => stackWidth(p) + 18));
+  const totals = totalHistory(state);
+  const now = totals[totals.length - 1];
+  const first = totals[0];
+  const bar = BAR[state.unit];
+  const rows = records.map(({ l, r }, i) => {
+    const plates = stacks[i];
+    const made = tidy(bar + 2 * plates.reduce((sum, p) => sum + p, 0));
+    let caption = plates.length ? `${plates.map(fmt).join(' + ')} each side` : 'The empty bar';
+    if (r.value < bar) caption = 'Lighter than the empty bar';
+    else if (made !== r.value) caption += `. Plates make ${fmt(made)}`;
+    return `<li class="pr">
+      <div class="pr-head">
+        <h2 class="pr-lift">${l.name}</h2>
+        <span class="pr-date">${r.kind === 'remax' ? 'Re-max, ' : ''}${shortDate(r.date)}</span>
+      </div>
+      <p class="pr-num">${fmt(r.value)}<span class="pr-unit">${state.unit}</span></p>
+      ${loadedBar(plates, sleeve)}
+      <p class="pr-plates">${caption}</p>
+      ${r.previous ? `<p class="pr-gain">Up ${fmt(r.value - r.previous.value)} from ${fmt(r.previous.value)} on ${shortDate(r.previous.date)}</p>` : ''}
+    </li>`;
+  }).join('');
+  const rise = first && first.date !== now.date ? ` Up ${fmt(now.total - first.total)} from your first total of ${big(first.total)} on ${shortDate(first.date)}.` : '';
+  return `<header class="top"><h1 class="display">PRs</h1></header>
+    ${now ? `<section class="total" aria-label="Total">
+      <p class="total-num">${big(now.total)}<span class="total-unit">${state.unit} total</span></p>
+      <p class="hint">Your best squat, bench and deadlift added up, reached ${shortDate(now.date)}.${rise}</p>
+    </section>` : ''}
+    <ol class="pr-list">${rows}</ol>
+    <p class="hint">A record is a lift you did: the maxes you entered when you started, maxes added in History → Lifts, and good re-max attempts. Estimates from 2+ sets don't count.</p>`;
+}
+
 // Logged sets light up like meet judging lights: white for a good set, red for a short one.
 function setLight(session, index, i, reps) {
   const target = prescription(session.kind, ui.week).reps;
@@ -949,7 +1023,7 @@ function liftsHistory() {
       ${cell(total(b), prev && total(prev))}
     </tr>`;
   }).reverse().join('');
-  const why = (c) => (c.past ? 'Before the app' : c.test ? `Week 3 test set, ${fmt(c.test.weight)} × ${c.test.reps}`
+  const why = (c) => (c.past ? 'Entered by hand' : c.test ? `Week 3 test set, ${fmt(c.test.weight)} × ${c.test.reps}`
     : c.block ? `Block ${c.block + 1} started` : 'Your starting max');
   const when = (c) => (c.date ? shortDate(c.date) : 'Week 3');
   // Maxes from before the app open to be changed; the rest come from the blocks.

@@ -171,6 +171,11 @@ main {
   font-weight: 600;
 }
 
+.field-note {
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .field-row {
   display: flex;
   align-items: baseline;
@@ -906,8 +911,119 @@ legend.setting-title + * {
 }
 
 .extra {
-  padding: 16px 0;
   border-bottom: 1px solid var(--line);
+}
+
+/* A closed accessory is one line: name, a light per set, and today's or last time's sets. */
+.extra-row {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+
+.row-line {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "name dots"
+    "sum sum";
+  align-items: center;
+  gap: 3px 12px;
+}
+
+.row-name {
+  grid-area: name;
+  font: 700 21px/1.1 var(--display);
+}
+
+.row-variant {
+  color: var(--muted);
+  font: 600 13px var(--text);
+}
+
+.row-dots {
+  grid-area: dots;
+  display: flex;
+  gap: 4px;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--steel);
+  border-radius: 50%;
+}
+
+.dot.is-on {
+  border-color: var(--chalk);
+  background: var(--chalk);
+}
+
+.row-sum {
+  grid-area: sum;
+  color: var(--muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.row-line.is-skipped .row-name {
+  color: var(--steel);
+}
+
+.extra.is-open .extra-row {
+  padding-bottom: 8px;
+}
+
+.extra-body {
+  padding-bottom: 16px;
+}
+
+.extra-detail + .extra-detail {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+
+/* A superset: both halves under one bracket on the left. */
+.superset-tag {
+  justify-self: start;
+  padding: 1px 8px;
+  border: 1px solid var(--steel);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.is-superset .extra-row,
+.is-superset .extra-body {
+  padding-left: 12px;
+  border-left: 3px solid var(--steel);
+}
+
+.is-superset .extra-body > .hint:first-child {
+  margin: 0 0 12px;
+}
+
+.round-line {
+  color: var(--chalk);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.select-input {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.select-input option {
+  background: var(--surface);
+  color: var(--chalk);
 }
 
 .extra-head {
@@ -922,11 +1038,11 @@ legend.setting-title + * {
   font: 700 22px/1.1 var(--display);
 }
 
-.extra.is-skipped .extra-name {
+.extra-detail.is-skipped .extra-name {
   color: var(--steel);
 }
 
-.extra.is-skipped .btn-quiet {
+.extra-detail.is-skipped .btn-quiet {
   min-height: 36px;
 }
 
@@ -1076,6 +1192,17 @@ legend.setting-title + * {
 
 .h-delta {
   color: var(--gain);
+}
+
+/* Each max a lift has trained from, newest first, with the day it was set. */
+.max-dates {
+  margin-top: 8px;
+}
+
+.h-when {
+  display: block;
+  font-size: 17px;
+  font-weight: 600;
 }
 
 /* ---------- Charts ---------- */

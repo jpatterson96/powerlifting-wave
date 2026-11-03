@@ -4,7 +4,7 @@ import {
   WEEKS, ATTEMPTS, FIRST_TEST, SECOND_TEST, FINISH_WEEK, prescription, roundTo, targetWeight, workingMax, platesPerSide,
   warmups, REMAX_RAMP, estimateMax, adjustMax, weekMax, attemptWeight, setWeight, singleWeight, restSeconds, newBlock,
   setFinish, finishFor, sessionStatus, weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak,
-  restartBlock, evaluateLift, liftHistory, convertState, isValidState, upgrade, emptyState,
+  restartBlock, evaluateLift, liftHistory, maxChanges, convertState, isValidState, upgrade, emptyState,
 } from '../logic.js';
 
 const MAX = { squat: 405, bench: 285, deadlift: 495 };
@@ -165,6 +165,22 @@ test('the week 3 test set sets the max for weeks 4-8', () => {
   assert.equal(weekMax(b, 'squat', 5, LB), 385); // 95% of 405: 384.75
   tue.skipped = true;
   assert.equal(weekMax(b, 'squat', 5, LB), 405);
+});
+
+test('each max is dated: the block start, then the day of a week 3 test set that moved it', () => {
+  const state = { ...LB, blocks: [newBlock(MAX, '2026-11-02')] };
+  const tue = base(state.blocks[0], FIRST_TEST, 'squat');
+  assert.deepEqual(maxChanges(state, 'squat').map((c) => [c.date, c.value]), [['2026-11-02', 405]]);
+  tue.reps = [2, 2, 2, 2, 8];
+  tue.date = '2026-11-17';
+  state.blocks.push(newBlock({ ...MAX, squat: 425 }, '2026-12-28'));
+  assert.deepEqual(maxChanges(state, 'squat').map((c) => [c.date, c.value, c.change]),
+    [['2026-11-02', 405, 0], ['2026-11-17', 412.5, 7.5], ['2026-12-28', 425, 12.5]]);
+  // A test that holds the max isn't a new one, and one logged before days were recorded has no date.
+  delete tue.date;
+  assert.equal(maxChanges(state, 'squat')[1].date, null);
+  tue.reps = [2, 2, 2, 2, 5];
+  assert.equal(maxChanges(state, 'squat').length, 2);
 });
 
 test('re-max attempts build from the week 6 estimate and can be changed', () => {

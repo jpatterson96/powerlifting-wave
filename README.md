@@ -102,6 +102,8 @@ days, sets, rep range (e.g. 3 × 8–12), weight jump and rest; **Add an exercis
 adds one to that day only.
 
 - **Skip today** for anything you don't do that day; nothing is counted against it.
+- **Add a set** and **Remove a set** change today's sets only. Remove takes off the last set not
+  done yet, or asks before removing a logged one.
 - Exercises with variants (e.g. *Dumbbell, Machine*) have a switch; each variant keeps its own
   numbers, and the one you used last comes up next time.
 - Double progression: each set is prefilled from last time with one more rep, until every set
@@ -118,6 +120,9 @@ Apple Health isn't reachable from a web app, so body weight is logged in the app
 - weekly volume (weight × reps).
 
 Tap or drag across a chart for a week's numbers; the same numbers are in "week by week" below it.
+Below the max chart, every max the lift has trained from is listed with the day it was set: each
+block's starting max (the day the block started) and any change from a week 3 test set (the day it
+was logged). Settings → Current maxes shows the same dates.
 
 **Accessories**: each exercise's heaviest set, estimated max, best session, a chart of its best set
 by session, and recent sessions. **Body**: log today's weight and see it charted.

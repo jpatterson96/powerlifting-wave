@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { newBlock, emptyState, convertState, upgrade, isValidState, estimateMax } from '../logic.js';
 import {
-  newExercise, dayExtras, ensureEntry, entryOf, exerciseHistory, lastTime, defaultVariant, suggestion, sessionBest,
-  records, logBodyweight, cleanExtras,
+  newExercise, dayExtras, dayGroups, setLink, supersetOrder, ensureEntry, entryOf, exerciseHistory, lastTime,
+  defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras,
 } from '../extras.js';
 
 const MAX = { squat: 385, bench: 315, deadlift: 455 };
@@ -26,6 +26,27 @@ test('each day lists its accessories, then anything added to that day only', () 
   ensureEntry(mon, curl, null);
   assert.deepEqual(dayExtras(state, mon), [press, row, curl]);
   assert.deepEqual(entryOf(mon, curl.id).sets, [null, null]);
+});
+
+test('supersets pair two exercises, in order, wherever they sit in the list', () => {
+  const { state, press, row, curl, b } = setup();
+  const mon = b.log[0][0];
+  curl.days = ['Monday'];
+  assert.deepEqual(dayGroups(state, mon).map((g) => g.map((e) => e.name)), [['Shoulder press'], ['Row'], ['Curl']]);
+  setLink(state, curl, press); // curl first, though it's last in the list
+  assert.deepEqual(dayGroups(state, mon).map((g) => g.map((e) => e.name)), [['Curl', 'Shoulder press'], ['Row']]);
+  setLink(state, row, press); // press can only be in one superset
+  assert.equal(curl.link, null);
+  assert.equal(row.link, press.id);
+  setLink(state, row, null);
+  assert.equal(row.link, null);
+  // On a day without its partner, an exercise shows on its own.
+  setLink(state, press, row);
+  assert.deepEqual(dayGroups(state, b.log[0][3]).map((g) => g.length), [1]);
+  assert.deepEqual(supersetOrder([3, 2]), [
+    { which: 0, set: 0 }, { which: 1, set: 0 }, { which: 0, set: 1 }, { which: 1, set: 1 }, { which: 0, set: 2 },
+  ]);
+  assert.deepEqual(supersetOrder([0, 2]), [{ which: 1, set: 0 }, { which: 1, set: 1 }]);
 });
 
 test('last time is per variant and only looks at earlier days', () => {
@@ -92,6 +113,7 @@ test('bad accessory data is dropped without losing the log', () => {
   ensureEntry(b.log[0][0], press, 'Dumbbell').sets = [{ weight: 50, reps: 12 }, null, null];
   const saved = JSON.parse(JSON.stringify(state));
   saved.exercises.push({ id: 'BAD id', name: '<b>' });
+  saved.exercises.push({ ...saved.exercises[0], id: 'selfie', link: 'selfie' }); // can't superset with itself
   saved.blocks[0].log[0][0].extras.push({ exercise: 'x', variant: null, skipped: 'no', sets: [] });
   saved.blocks[0].log[0][1].extras = 'nope';
   saved.blocks[0].log[0][0].date = 'yesterday';

@@ -5,10 +5,15 @@ export const REPO = 'jpatterson96/powerlifting-wave-data';
 const API = `https://api.github.com/repos/${REPO}`;
 const FILE = 'data.json';
 const KEY = 'powerlifting-wave-sync';
+// The last log this phone and GitHub agreed on, so a merge can tell which side changed what.
+const BASE = 'powerlifting-wave-base';
 const DELAY = 4000;
+// Checks for changes made elsewhere at most this often when the app comes back on screen.
+const PULL_GAP = 20000;
 
 let cfg = load();
-let hooks = { getState: () => null, onStatus: () => {} };
+let hooks = { getState: () => null, onStatus: () => {}, onRemote: () => {}, merge: (remote) => remote };
+let lastPull = 0;
 let timer = null;
 let running = false;
 let queued = false;
@@ -27,6 +32,23 @@ function store() {
     localStorage.setItem(KEY, JSON.stringify(cfg));
   } catch {
     // Sync settings are rebuilt on the next connect if storage is unavailable.
+  }
+}
+
+function setBase(text) {
+  try {
+    if (text === null) localStorage.removeItem(BASE);
+    else localStorage.setItem(BASE, text);
+  } catch {
+    // Without a base, a merge joins both sides' lists instead.
+  }
+}
+
+export function getBase() {
+  try {
+    return JSON.parse(localStorage.getItem(BASE));
+  } catch {
+    return null;
   }
 }
 
@@ -118,15 +140,17 @@ async function push() {
   store();
   setStatus('saving');
   try {
-    const text = JSON.stringify(hooks.getState(), null, 2);
+    let text = JSON.stringify(hooks.getState(), null, 2);
     try {
       cfg.sha = await writeRemote(cfg.token, cfg.sha, text);
     } catch (err) {
-      // 409/422 mean the file changed since this phone last saved. This phone's log wins.
+      // 409/422 mean the file changed since this phone last saved: merge in what changed there, then save.
       if (err.status !== 409 && err.status !== 422) throw err;
       const remote = await readRemote(cfg.token);
+      if (remote?.state) text = JSON.stringify(hooks.merge(remote.state), null, 2);
       cfg.sha = await writeRemote(cfg.token, remote?.sha, text);
     }
+    setBase(text);
     cfg.lastSynced = new Date().toISOString();
     store();
     setStatus(cfg.dirty ? 'pending' : 'synced');
@@ -178,6 +202,7 @@ export async function connect(token) {
   }
   cfg = { token, sha: remote?.sha ?? null, dirty: false, lastSynced: remote ? new Date().toISOString() : null };
   store();
+  setBase(remote?.state ? JSON.stringify(remote.state, null, 2) : null);
   setStatus('synced');
   return { ok: true, remote };
 }
@@ -192,6 +217,7 @@ export async function fetchSaved() {
     if (!remote?.state) return { ok: false, message: 'There is no readable log saved on GitHub yet.' };
     cfg.sha = remote.sha;
     store();
+    setBase(JSON.stringify(remote.state, null, 2));
     return { ok: true, state: remote.state };
   } catch (err) {
     if ([401, 403, 404].includes(err.status)) {
@@ -202,20 +228,48 @@ export async function fetchSaved() {
   }
 }
 
+// Loads a newer log from GitHub when this phone has nothing of its own waiting to save. With changes
+// waiting, the next save merges instead.
+export async function pull() {
+  if (!cfg.token || cfg.dirty || running) return;
+  lastPull = Date.now();
+  try {
+    const remote = await readRemote(cfg.token);
+    // A change made on the phone while reading is merged by its save instead.
+    if (!remote?.state || remote.sha === cfg.sha || cfg.dirty || running) return;
+    cfg.sha = remote.sha;
+    cfg.lastSynced = new Date().toISOString();
+    store();
+    setBase(JSON.stringify(remote.state, null, 2));
+    hooks.onRemote(remote.state);
+  } catch (err) {
+    if ([401, 403, 404].includes(err.status)) setStatus('bad-key');
+    // Offline or GitHub unavailable: try again next time the app opens.
+  }
+}
+
 export function disconnect() {
   clearTimeout(timer);
   cfg = {};
   store();
+  setBase(null);
   setStatus('off');
 }
 
 export function init(appHooks) {
   hooks = appHooks;
-  const retry = () => {
-    if (cfg.token && cfg.dirty) push();
+  // Logs from before merging existed: if nothing is waiting to save, this phone matches its last save.
+  if (cfg.token && !cfg.dirty && !getBase()) setBase(JSON.stringify(hooks.getState(), null, 2));
+  const sync = () => {
+    if (!cfg.token) return;
+    if (cfg.dirty) push();
+    else if (Date.now() - lastPull > PULL_GAP) pull();
   };
-  window.addEventListener('online', retry);
+  window.addEventListener('online', sync);
   // iOS can suspend the app soon after it leaves the screen, so save straight away instead of waiting.
-  document.addEventListener('visibilitychange', retry);
-  retry();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') sync();
+    else if (cfg.token && cfg.dirty) push();
+  });
+  sync();
 }

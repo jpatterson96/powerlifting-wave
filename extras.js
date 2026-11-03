@@ -22,6 +22,46 @@ export function dayExtras(state, session) {
   return [...listed, ...added];
 }
 
+// The day's accessories in the order they're done: single exercises, and supersets as pairs. An exercise's
+// `link` names the one it's supersetted with; the pair shows where the first of the two sits in the list.
+export function dayGroups(state, session) {
+  const list = dayExtras(state, session);
+  const used = new Set();
+  const groups = [];
+  for (const e of list) {
+    if (used.has(e.id)) continue;
+    used.add(e.id);
+    const partner = list.find((x) => !used.has(x.id) && (e.link === x.id || x.link === e.id));
+    if (!partner) {
+      groups.push([e]);
+      continue;
+    }
+    used.add(partner.id);
+    groups.push(e.link === partner.id ? [e, partner] : [partner, e]);
+  }
+  return groups;
+}
+
+// Pairs two exercises as a superset, `first` done before `second`. An exercise is in one superset at most,
+// so any earlier pairing of either is undone. A null `second` just clears `first`'s pairing.
+export function setLink(state, first, second) {
+  for (const e of state.exercises) {
+    if (e === first || (second && e === second)) e.link = null;
+    else if (e.link === first.id || (second && e.link === second.id)) e.link = null;
+  }
+  if (second && second !== first) first.link = second.id;
+}
+
+// A superset's sets in the order they're done: one of each, round by round. `counts` gives each
+// exercise's number of sets (0 when skipped today).
+export function supersetOrder(counts) {
+  const order = [];
+  for (let set = 0; set < Math.max(...counts); set++) {
+    counts.forEach((n, which) => { if (set < n) order.push({ which, set }); });
+  }
+  return order;
+}
+
 export const entryOf = (session, id) => session.extras?.find((x) => x.exercise === id) ?? null;
 
 // Creates the day's record for an exercise the first time anything is logged against it.
@@ -130,7 +170,8 @@ function validExercise(e) {
     Array.isArray(e.variants) && e.variants.length <= 8 && e.variants.every((v) => text(v, 40)) &&
     int(e.sets, 1, 10) && int(e.low, 1, 50) && int(e.high, e.low, 50) &&
     typeof e.step === 'number' && e.step > 0 && e.step <= 100 && int(e.rest, 15, 900) &&
-    Array.isArray(e.days) && e.days.every((d) => WEEKDAYS.includes(d));
+    Array.isArray(e.days) && e.days.every((d) => WEEKDAYS.includes(d)) &&
+    (e.link === undefined || e.link === null || (typeof e.link === 'string' && /^[a-z0-9]{1,24}$/.test(e.link) && e.link !== e.id));
 }
 
 const validSet = (s) => s === null || (Boolean(s) && typeof s.weight === 'number' && s.weight >= 0 && s.weight < 5000 && int(s.reps, 0, 100));

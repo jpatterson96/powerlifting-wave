@@ -115,7 +115,7 @@ function testResult(block, liftId, week, state) {
   const last = s && !s.skipped ? s.reps[s.reps.length - 1] : null;
   if (last === null || last === undefined) return null;
   const weight = setWeight(block, s, week, s.reps.length - 1, state);
-  return { weight, reps: last, estimate: estimateMax(weight, last) };
+  return { weight, reps: last, estimate: estimateMax(weight, last), date: s.date ?? null };
 }
 
 // The max a week's percentages come from. From week 4 on, it's the max the week 3 test set settled on.
@@ -124,6 +124,20 @@ export function weekMax(block, liftId, week, state) {
   if (week < WAVE_TWO) return max;
   const test = testResult(block, liftId, FIRST_TEST, state);
   return test ? adjustMax(max, test.estimate, liftId, state).value : max;
+}
+
+// Every max a lift has trained from, oldest first, with the day it was set: each block's starting max (the
+// day the block started), then the max its week 3 test set moved it to. A test logged before days were
+// recorded has a null date.
+export function maxChanges(state, liftId) {
+  const out = [];
+  state.blocks.forEach((b, block) => {
+    out.push({ block, week: 0, date: b.started, value: b.max[liftId], test: null });
+    const test = testResult(b, liftId, FIRST_TEST, state);
+    const moved = weekMax(b, liftId, WAVE_TWO, state);
+    if (test && moved !== b.max[liftId]) out.push({ block, week: WAVE_TWO, date: test.date, value: moved, test });
+  });
+  return out.map((c, i) => ({ ...c, change: i ? c.value - out[i - 1].value : 0 }));
 }
 
 // Re-max attempts build from the week 6 estimate when there is one, else the second-wave max. The real

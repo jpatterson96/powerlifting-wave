@@ -181,6 +181,13 @@ test('each max is dated: the block start, then the day of a week 3 test set that
   assert.equal(maxChanges(state, 'squat')[1].date, null);
   tue.reps = [2, 2, 2, 2, 5];
   assert.equal(maxChanges(state, 'squat').length, 2);
+  // Maxes from before the app come first by date, and a block's max can be dated the day it was hit.
+  state.pastMaxes = [{ date: '2025-03-01', lift: 'squat', value: 365 }, { date: '2024-05-01', lift: 'squat', value: 335 },
+    { date: '2025-03-01', lift: 'bench', value: 275 }];
+  state.blocks[0].maxDates = { squat: '2026-09-20' };
+  assert.deepEqual(maxChanges(state, 'squat').map((c) => [c.date, c.value, c.change, Boolean(c.past)]), [
+    ['2024-05-01', 335, 0, true], ['2025-03-01', 365, 30, true], ['2026-09-20', 405, 40, false], ['2026-12-28', 425, 20, false]]);
+  assert.equal(convertState(state, 'kg').pastMaxes[0].value, 365 / 2.20462);
 });
 
 test('re-max attempts build from the week 6 estimate and can be changed', () => {

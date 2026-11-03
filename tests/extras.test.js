@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { newBlock, emptyState, convertState, upgrade, isValidState, estimateMax } from '../logic.js';
 import {
   newExercise, dayExtras, dayGroups, setLink, supersetOrder, ensureEntry, entryOf, exerciseHistory, lastTime,
-  defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras,
+  defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras, finishExtras,
 } from '../extras.js';
 
 const MAX = { squat: 385, bench: 315, deadlift: 455 };
@@ -47,6 +47,20 @@ test('supersets pair two exercises, in order, wherever they sit in the list', ()
     { which: 0, set: 0 }, { which: 1, set: 0 }, { which: 0, set: 1 }, { which: 1, set: 1 }, { which: 0, set: 2 },
   ]);
   assert.deepEqual(supersetOrder([0, 2]), [{ which: 1, set: 0 }, { which: 1, set: 1 }]);
+});
+
+test('finishing a day skips what was not started and ends the rest at the sets logged', () => {
+  const { state, press, row, curl, b } = setup();
+  const mon = b.log[0][0];
+  ensureEntry(mon, press, 'Machine').sets = [{ weight: 50, reps: 10 }, null, { weight: 50, reps: 9 }];
+  ensureEntry(mon, curl, null).sets = [{ weight: 30, reps: 12 }, { weight: 30, reps: 12 }];
+  assert.equal(finishExtras(state, mon), 2);
+  assert.deepEqual(entryOf(mon, press.id).sets, [{ weight: 50, reps: 10 }, { weight: 50, reps: 9 }]);
+  assert.equal(entryOf(mon, press.id).variant, 'Machine');
+  assert.equal(entryOf(mon, row.id).skipped, true);
+  assert.equal(entryOf(mon, curl.id).sets.length, 2);
+  // Already finished: nothing more to do, and a skip can still be undone by hand.
+  assert.equal(finishExtras(state, mon), 0);
 });
 
 test('last time is per variant and only looks at earlier days', () => {
@@ -118,7 +132,11 @@ test('bad accessory data is dropped without losing the log', () => {
   saved.blocks[0].log[0][1].extras = 'nope';
   saved.blocks[0].log[0][0].date = 'yesterday';
   saved.bodyweight = [{ date: '2026-11-02', weight: -1 }, { date: '2026-11-02', weight: 200 }];
+  saved.pastMaxes = [{ date: '2025-06-01', lift: 'squat', value: 365 }, { date: '2025-06-01', lift: 'curl', value: 99 }, { date: 'June', lift: 'bench', value: 300 }];
+  saved.blocks[0].maxDates = { squat: '2026-08-15', bench: 'last week' };
   const clean = cleanExtras(upgrade(saved));
+  assert.deepEqual(clean.pastMaxes, [{ date: '2025-06-01', lift: 'squat', value: 365 }]);
+  assert.deepEqual(clean.blocks[0].maxDates, { squat: '2026-08-15' });
   assert.equal(isValidState(clean), true);
   assert.equal(clean.exercises.length, 3);
   assert.equal(clean.blocks[0].log[0][0].extras.length, 1);

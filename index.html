@@ -83,6 +83,33 @@
     </div>
   </dialog>
 
+  <dialog class="sheet" id="past-sheet" aria-labelledby="past-title">
+    <form class="sheet-body" id="past-form" novalidate>
+      <h2 class="sheet-title" id="past-title">Add an earlier max</h2>
+      <p class="sheet-note">A max from before you used the app, so History shows your progress over the years.</p>
+      <label class="field">
+        <span class="field-label">Lift</span>
+        <span class="field-row"><select class="text-input select-input" name="lift" id="past-lift"></select></span>
+      </label>
+      <div class="field-grid">
+        <label class="field">
+          <span class="field-label">Max</span>
+          <span class="field-row"><input class="num-input num-small" name="value" type="number" inputmode="decimal" step="any" min="0"><span class="field-unit" id="past-unit"></span></span>
+        </label>
+        <label class="field">
+          <span class="field-label">Date</span>
+          <span class="field-row"><input class="text-input date-input" name="date" type="date"></span>
+        </label>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn-quiet" type="button" data-action="past-delete" id="past-delete">Delete</button>
+        <span class="sheet-actions-end">
+          <button class="btn-quiet" type="button" data-action="sheet-close">Cancel</button>
+          <button class="btn" type="submit">Save</button>
+        </span>
+      </div>
+    </form>
+  </dialog>
   <dialog class="sheet" id="exercise-sheet" aria-labelledby="exercise-title">
     <form class="sheet-body exercise-form" id="exercise-form" novalidate>
       <h2 class="sheet-title" id="exercise-title">New exercise</h2>

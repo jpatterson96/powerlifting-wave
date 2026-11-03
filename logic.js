@@ -126,18 +126,23 @@ export function weekMax(block, liftId, week, state) {
   return test ? adjustMax(max, test.estimate, liftId, state).value : max;
 }
 
-// Every max a lift has trained from, oldest first, with the day it was set: each block's starting max (the
-// day the block started), then the max its week 3 test set moved it to. A test logged before days were
-// recorded has a null date.
+// Every max a lift has had, oldest first, with the day it was set: maxes from before the app (`pastMaxes`),
+// each block's starting max (the day the block started, unless another day was entered in `maxDates`), and
+// the max a week 3 test set moved it to. A test logged before days were recorded has a null date and keeps
+// its place after the max before it.
 export function maxChanges(state, liftId) {
-  const out = [];
+  const out = (state.pastMaxes ?? []).filter((p) => p.lift === liftId)
+    .map((p) => ({ block: null, week: 0, date: p.date, value: p.value, test: null, past: p }));
   state.blocks.forEach((b, block) => {
-    out.push({ block, week: 0, date: b.started, value: b.max[liftId], test: null });
+    out.push({ block, week: 0, date: b.maxDates?.[liftId] ?? b.started, value: b.max[liftId], test: null, past: null });
     const test = testResult(b, liftId, FIRST_TEST, state);
     const moved = weekMax(b, liftId, WAVE_TWO, state);
-    if (test && moved !== b.max[liftId]) out.push({ block, week: WAVE_TWO, date: test.date, value: moved, test });
+    if (test && moved !== b.max[liftId]) out.push({ block, week: WAVE_TWO, date: test.date, value: moved, test, past: null });
   });
-  return out.map((c, i) => ({ ...c, change: i ? c.value - out[i - 1].value : 0 }));
+  let prev = '';
+  const sorted = out.map((c) => ({ c, key: (prev = c.date ?? prev) }))
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).map(({ c }) => c);
+  return sorted.map((c, i) => ({ ...c, change: i ? c.value - sorted[i - 1].value : 0 }));
 }
 
 // Re-max attempts build from the week 6 estimate when there is one, else the second-wave max. The real
@@ -415,6 +420,7 @@ export function convertState(state, to) {
     ...(state.exercises && { exercises: state.exercises.map((e) => ({ ...e, step: conv(e.step) })) }),
     ...(state.bodyweight && { bodyweight: state.bodyweight.map((e) => ({ ...e, weight: conv(e.weight) })) }),
     ...(state.imported && { imported: state.imported.map((w) => ({ ...w, extras: extras(w.extras) })) }),
+    ...(state.pastMaxes && { pastMaxes: state.pastMaxes.map((p) => ({ ...p, value: conv(p.value) })) }),
   };
 }
 

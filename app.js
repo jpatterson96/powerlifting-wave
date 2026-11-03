@@ -6,7 +6,7 @@ import {
   maxChanges, convertState, upgrade,
 } from './logic.js';
 import {
-  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, newExercise, dayExtras, dayGroups, setLink, supersetOrder, entryOf, ensureEntry,
+  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, newExercise, dayExtras, dayGroups, setLink, supersetOrder, entryOf, ensureEntry, finishExtras,
   exerciseHistory, lastTime, defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras,
 } from './extras.js';
 import { mergeLogs } from './merge.js';
@@ -26,14 +26,17 @@ const repsWeight = document.getElementById('reps-weight');
 const pickSheet = document.getElementById('pick-sheet');
 const exerciseSheet = document.getElementById('exercise-sheet');
 const exerciseForm = document.getElementById('exercise-form');
+const pastSheet = document.getElementById('past-sheet');
+const pastForm = document.getElementById('past-form');
 const restoreInput = document.getElementById('restore-input');
 
 let state = load();
 // `open` is the index of the expanded day in the shown week; undefined means "pick the next day to train".
-// `history` is the History tab's section; `exercise` an accessory opened there; `editing` the exercise in the editor.
+// `history` is the History tab's section; `exercise` an accessory opened there; `editing` the exercise in the editor;
+// `past` the earlier max being changed, by its place in state.pastMaxes (null for a new one).
 const ui = {
   tab: 'train', reviewing: false, week: null, open: undefined, sheet: null, lift: 'squat',
-  history: 'lifts', exercise: null, variant: null, editing: null,
+  history: 'lifts', exercise: null, variant: null, editing: null, past: null,
   // The accessory (or superset) opened on the shown day, by its first exercise's id; undefined picks one under way.
   extraOpen: undefined,
 };
@@ -102,9 +105,13 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+const isDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+// The year shows only when it isn't this one.
 function shortDate(iso) {
   const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const year = y === new Date().getFullYear() ? {} : { year: 'numeric' };
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...year });
 }
 
 // The change that set the max a block's week trains from: the block's start, or its week 3 test set.
@@ -177,14 +184,13 @@ function unitOptions() {
   return [{ value: 'lb', label: 'Pounds' }, { value: 'kg', label: 'Kilograms' }];
 }
 
-function maxField(lift, value, note = '') {
+function maxField(lift, value) {
   return `<label class="field">
     <span class="field-label">${lift.name}</span>
     <span class="field-row">
       <input class="num-input" name="${lift.id}" type="number" inputmode="decimal" step="any" min="0" value="${value}">
       <span class="field-unit">${state.unit}</span>
     </span>
-    ${note ? `<span class="field-note">${note}</span>` : ''}
   </label>`;
 }
 
@@ -467,11 +473,15 @@ function extrasSection(session, i) {
     <h3 class="extras-title">Accessories</h3>
     ${groups.length ? `<ol class="extra-list">${groups.map((g) => groupView(session, i, g, g[0].id === open)).join('')}</ol>`
       : `<p class="hint">Nothing on ${session.day}s yet. Add the exercises you do after your ${liftOf(session).name.toLowerCase()}.</p>`}
-    <button class="btn-quiet" data-action="extra-add" data-index="${i}" data-key="extra-add-${i}">Add an exercise</button>
+    <div class="extras-end">
+      <button class="btn-quiet" data-action="extra-add" data-index="${i}" data-key="extra-add-${i}">Add an exercise</button>
+      ${groups.flat().some((e) => !isFinished(entryOf(session, e.id))) ? `<button class="btn-quiet" data-action="extra-finish" data-index="${i}" data-key="extra-finish-${i}">Skip the rest</button>` : ''}
+    </div>
   </section>`;
 }
 
 const isUnderway = (x) => x && !x.skipped && x.sets.some(Boolean) && x.sets.some((s) => s === null);
+const isFinished = (x) => Boolean(x) && (x.skipped || (x.sets.length > 0 && x.sets.every(Boolean)));
 
 // The group to show open: the one tapped, else one under way today. Its first exercise's id names it.
 function openGroup(session, groups) {
@@ -487,10 +497,11 @@ function rowLine(session, i, e) {
   const { entry, variant, last } = extraPlan(session, i, e);
   const range = `${e.sets} × ${e.low}–${e.high}`;
   const done = entry?.sets.filter(Boolean) ?? [];
+  const count = setCount(e, entry);
   const summary = entry?.skipped ? 'Skipped today'
-    : done.length ? `${done.length} of ${setCount(e, entry)} sets: ${setsText(done)}`
+    : done.length ? `${done.length === count ? plural(count, 'set') : `${done.length} of ${count} sets`}: ${setsText(done)}`
       : last ? `${range}. Last ${setsText(last.sets)}` : `${range}. New`;
-  const dots = entry?.skipped ? '' : Array.from({ length: setCount(e, entry) }, (_, s) => `<i class="dot${entry?.sets[s] ? ' is-on' : ''}"></i>`).join('');
+  const dots = entry?.skipped ? '' : Array.from({ length: count }, (_, s) => `<i class="dot${entry?.sets[s] ? ' is-on' : ''}"></i>`).join('');
   return `<span class="row-line${entry?.skipped ? ' is-skipped' : ''}">
     <span class="row-name">${esc(e.name)}${variant ? ` <span class="row-variant">${esc(variant)}</span>` : ''}</span>
     <span class="row-dots" aria-hidden="true">${dots}</span>
@@ -506,23 +517,36 @@ function groupView(session, i, group, open) {
     : group.every((e, k) => all[k]?.skipped || (all[k] && all[k].sets.every(Boolean))) ? 'done'
       : all.some((x) => x?.sets.some(Boolean)) ? 'started' : 'todo';
   const rest = Math.max(...group.map((e) => e.rest));
-  // An open superset names its halves below, so its heading shows the round instead.
-  let heading = group.map((e) => rowLine(session, i, e)).join('');
-  if (pair && open) {
+  const toggle = (content, id) => `<button class="extra-row" data-action="extra-open" data-group="${key}" data-key="extra-row-${i}-${id}" aria-expanded="${open}">${content}</button>`;
+  // Closed, each exercise's line opens the group and has its own skip. Open, the controls are below, and
+  // a superset's heading shows the round instead of its halves.
+  let heading = group.map((e) => `<div class="extra-line">${toggle(rowLine(session, i, e), e.id)}${quickSkip(session, i, e)}</div>`).join('');
+  if (open && pair) {
     const counts = group.map((e, k) => (all[k]?.skipped ? 0 : setCount(e, all[k])));
     const next = supersetOrder(counts).find(({ which, set }) => !all[which]?.sets[set]);
-    heading = `<span class="round-line">${next ? `Round ${next.set + 1} of ${Math.max(...counts)}` : 'Every round done'}: ${group.map((e) => esc(e.name)).join(' + ')}</span>`;
+    heading = toggle(`<span class="round-line">${next ? `Round ${next.set + 1} of ${Math.max(...counts)}` : 'Every round done'}: ${group.map((e) => esc(e.name)).join(' + ')}</span>`, key);
+  } else if (open) {
+    heading = toggle(rowLine(session, i, group[0]), key);
   }
   return `<li class="extra${pair ? ' is-superset' : ''}${open ? ' is-open' : ''}" data-status="${status}">
-    <button class="extra-row" data-action="extra-open" data-group="${key}" data-key="extra-row-${i}-${key}" aria-expanded="${open}">
+    <div class="extra-top">
       ${pair ? '<span class="superset-tag">Superset</span>' : ''}
       ${heading}
-    </button>
+    </div>
     ${open ? `<div class="extra-body">
       ${pair ? `<p class="hint">One set of each back to back, then rest ${restText(rest)}.</p>` : ''}
       ${group.map((e) => extraDetail(session, i, e, pair)).join('')}
     </div>` : ''}
   </li>`;
+}
+
+// Skip, or undo a skip, without opening the exercise. Gone once a set is logged, as in the open view.
+function quickSkip(session, i, e) {
+  const entry = entryOf(session, e.id);
+  const ids = `data-index="${i}" data-exercise="${e.id}" data-key="row-skip-${i}-${e.id}"`;
+  if (entry?.skipped) return `<button class="row-skip" data-action="extra-unskip" ${ids} aria-label="Undo skipping ${esc(e.name)}">Undo</button>`;
+  if (entry?.sets.some(Boolean)) return '';
+  return `<button class="row-skip" data-action="extra-skip" ${ids} aria-label="Skip ${esc(e.name)} today">Skip</button>`;
 }
 
 // The set lights and controls for one exercise; in a superset each half gets its name above it.
@@ -823,12 +847,21 @@ function liftsHistory() {
       ${cell(total(b), prev && total(prev))}
     </tr>`;
   }).reverse().join('');
-  const why = (c) => (c.test ? `Week 3 test set, ${fmt(c.test.weight)} × ${c.test.reps}`
+  const why = (c) => (c.past ? 'Before the app' : c.test ? `Week 3 test set, ${fmt(c.test.weight)} × ${c.test.reps}`
     : c.block ? `Block ${c.block + 1} started` : 'Your starting max');
-  const changeRows = changes.map((c, k) => `<tr>
-      <th scope="row"><span class="h-when">${c.date ? shortDate(c.date) : 'Week 3'}</span><span class="h-date">${why(c)}</span></th>
+  const when = (c) => (c.date ? shortDate(c.date) : 'Week 3');
+  // Maxes from before the app open to be changed; the rest come from the blocks.
+  const changeRows = changes.map((c, k) => {
+    const label = `<span class="h-when">${when(c)}</span><span class="h-date">${why(c)}</span>`;
+    return `<tr>
+      <th scope="row">${c.past ? `<button class="h-edit" data-action="past-edit" data-past="${state.pastMaxes.indexOf(c.past)}" aria-label="Change your ${when(c)} max">${label}</button>` : label}</th>
       <td><span class="h-num">${fmt(c.value)}</span>${k && c.change ? `<span class="h-delta">${c.change > 0 ? '+' : ''}${fmt(c.change)}</span>` : ''}</td>
-    </tr>`).reverse().join('');
+    </tr>`;
+  }).reverse().join('');
+  const yearsData = changes.map((c) => ({ value: c.value, label: when(c), title: c.date ? shortDate(c.date) : 'Week 3', note: why(c) }));
+  chartData.years = yearsData;
+  const years = changes.some((c) => c.past) && changes.length > 1
+    ? chartFigure('years', `${lift.short} max by date, ${changes.length} maxes`, progressChart(yearsData, width)) : '';
   const weekRows = weeks.filter((w) => w.volume > 0 || w.tests.length).map((w) => `<tr>
       <th scope="row"><span class="h-date">Block ${w.block + 1}, week ${w.week + 1}</span></th>
       <td>${fmt(w.max)}</td>
@@ -846,10 +879,13 @@ function liftsHistory() {
       </figure>
       <p class="hint">${tested.length ? 'Dots are estimates from your test sets (the 2+ sets) and re-max singles. Tap a week for its numbers.' : 'Dots appear here after your week 3 test sets: the max each one estimates.'}</p>
       <h3 class="chart-title history-title">${lift.short} max by date</h3>
+      ${years}
       <table class="history max-dates">
         <thead><tr><th scope="col">Set on</th><th scope="col">Max</th></tr></thead>
         <tbody>${changeRows}</tbody>
       </table>
+      ${changes.some((c) => c.past) ? '' : '<p class="hint">Add maxes from before you used the app to see your progress over the years.</p>'}
+      <button class="btn-quiet past-add" data-action="past-new" data-key="past-new">Add an earlier max</button>
     </section>
     <section class="chart-block">
       <h2 class="chart-title">Weekly volume</h2>
@@ -877,10 +913,17 @@ function liftsHistory() {
 
 function settingsView() {
   const b = block();
-  const maxNote = (l) => {
+  const maxRow = (l) => {
     const moved = maxChanges(state, l.id).find((c) => c.block === state.blocks.length - 1 && c.test);
     const when = moved?.date ? ` on ${shortDate(moved.date)}` : '';
-    return `Set ${shortDate(b.started)}${moved ? `. Your week 3 test set moved it to ${fmt(moved.value)}${when} for weeks 4–8` : ''}.`;
+    return `<div class="max-row">
+      ${maxField(l, fmt(b.max[l.id]))}
+      <label class="date-field">
+        <span class="field-note">Set on</span>
+        <input class="date-input" name="${l.id}Date" type="date" max="${todayISO()}" value="${b.maxDates?.[l.id] ?? b.started}">
+      </label>
+      ${moved ? `<p class="field-note">Your week 3 test set moved it to ${fmt(moved.value)}${when} for weeks 4–8.</p>` : ''}
+    </div>`;
   };
   const roundOptions = ROUNDING[state.unit].map((r) => ({ value: String(r), label: `${fmt(r)} ${state.unit}` }));
   const maxOptions = [{ value: 'false', label: 'Full max' }, { value: 'true', label: '90% training max' }];
@@ -909,9 +952,9 @@ function settingsView() {
     ${exercisesSection()}
     <section class="setting">
       <h2 class="setting-title">Current maxes</h2>
-      <p class="hint">For fixing a typo. Changes apply to block ${state.blocks.length} right away and keep the date each max was set.</p>
+      <p class="hint">Fix a typo, or set the day you hit each max. Changes apply to block ${state.blocks.length} right away. Maxes from before you started go in History → Lifts.</p>
       <form class="max-form" id="max-form" novalidate>
-        ${LIFTS.map((l) => maxField(l, fmt(b.max[l.id]), maxNote(l))).join('')}
+        ${LIFTS.map(maxRow).join('')}
         <button class="btn" type="submit">Save maxes</button>
       </form>
     </section>
@@ -971,7 +1014,7 @@ function tipContent(kind, w) {
     r.append(el('i', key), el('strong', '', value), el('span', '', label));
     return r;
   };
-  if (kind === 'progress' || kind === 'body') return [el('div', 'tip-title', w.title), row('key-line', fmt(w.value), w.note)];
+  if (kind === 'progress' || kind === 'body' || kind === 'years') return [el('div', 'tip-title', w.title), row('key-line', fmt(w.value), w.note)];
   const title = el('div', 'tip-title', `Block ${w.block + 1}, week ${w.week + 1}`);
   if (kind === 'volume') return [title, row('key-line', Math.round(w.volume).toLocaleString(), `${state.unit}, ${plural(w.reps, 'rep')}`)];
   return [title, row('key-line', fmt(w.max), w.since ? `max, set ${shortDate(w.since)}` : 'max'),
@@ -1037,8 +1080,7 @@ function logSet(session, set, reps) {
     const lifted = setWeight(block(), session, ui.week, set, state);
     if (session.kind === 'max') session.weights[set] ??= lifted;
     else session.weight ??= lifted;
-    session.date ??= todayISO();
-    block().lastTrained = todayISO();
+    markTrained(session);
   }
   session.reps[set] = reps;
   save();
@@ -1111,6 +1153,15 @@ function openExtra(index, id, set) {
   repsSheet.showModal();
 }
 
+// Logging on a day marks it trained. Days trained before today are over by then, so whatever accessories
+// they have left are skipped.
+function markTrained(session) {
+  const today = todayISO();
+  session.date ??= today;
+  block().lastTrained = today;
+  for (const s of block().log.flat()) if (s !== session && s.date && s.date < today) finishExtras(state, s);
+}
+
 function logExtra(index, exercise, set, value) {
   const session = sessionAt(index);
   const variant = entryOf(session, exercise.id)?.variant ?? defaultVariant(state, exercise);
@@ -1119,10 +1170,7 @@ function logExtra(index, exercise, set, value) {
   entry.sets[set] = value;
   // Clearing an added set at the end removes it again.
   if (value === null && set >= exercise.sets && set === entry.sets.length - 1) entry.sets.pop();
-  if (value) {
-    session.date ??= todayISO();
-    block().lastTrained = todayISO();
-  }
+  if (value) markTrained(session);
   save();
   if (!fresh) return;
   // In a superset the next set alternates between the two; a single exercise is a group of one.
@@ -1150,6 +1198,22 @@ function openPick(index) {
       <span class="index-name">${esc(e.name)}</span><span class="index-meta">${e.sets} × ${e.low}–${e.high}</span>
     </button>`).join('');
   pickSheet.showModal();
+}
+
+// A max from before the app: `index` is its place in state.pastMaxes, or null to add one for the lift shown.
+function openPast(index) {
+  const p = index === null ? null : state.pastMaxes[index];
+  ui.past = index;
+  const f = pastForm.elements;
+  document.getElementById('past-title').textContent = p ? 'Change earlier max' : 'Add an earlier max';
+  document.getElementById('past-unit').textContent = state.unit;
+  document.getElementById('past-delete').hidden = !p;
+  document.getElementById('past-lift').innerHTML = LIFTS.map((l) => `<option value="${l.id}">${l.name}</option>`).join('');
+  f.lift.value = p?.lift ?? ui.lift;
+  f.value.value = p ? fmt(p.value) : '';
+  f.date.value = p?.date ?? '';
+  f.date.max = todayISO();
+  pastSheet.showModal();
 }
 
 // `index` is the training day it was opened from, so a new exercise lands on that day.
@@ -1378,10 +1442,37 @@ const FORMS = {
     render();
     toast('Body weight logged.');
   },
+  // One max per lift per day: saving onto a day that already has one replaces it.
+  'past-form'(form) {
+    const f = form.elements;
+    const value = tidy(parseFloat(f.value.value));
+    const date = f.date.value;
+    if (!(value > 0) || value >= 5000) return toast('Enter the max you lifted.');
+    if (!isDay(date) || date > todayISO()) return toast('Pick the day you lifted it, on or before today.');
+    const edited = ui.past === null ? null : state.pastMaxes[ui.past];
+    const entry = { date, lift: f.lift.value, value };
+    state.pastMaxes = [...(state.pastMaxes ?? []).filter((p) => p !== edited && !(p.date === date && p.lift === entry.lift)), entry]
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    ui.lift = entry.lift;
+    save();
+    pastSheet.close();
+    render();
+    toast(edited ? 'Earlier max saved.' : 'Earlier max added.');
+  },
   'max-form'(form) {
-    const max = readMaxes(form, block().max);
+    const b = block();
+    const max = readMaxes(form, b.max);
     if (!max) return toast('Enter a max above 0 for all three lifts.');
-    block().max = max;
+    // A day left as the block's start isn't stored, so it follows the block.
+    const dates = {};
+    for (const l of LIFTS) {
+      const day = form.elements[`${l.id}Date`].value;
+      if (day && !(isDay(day) && day <= todayISO())) return toast('Pick a day on or before today for each max.');
+      if (day && day !== b.started) dates[l.id] = day;
+    }
+    b.max = max;
+    if (Object.keys(dates).length) b.maxDates = dates;
+    else delete b.maxDates;
     save();
     render();
     toast('Maxes saved.');
@@ -1512,6 +1603,13 @@ const ACTIONS = {
     save();
     render();
   },
+  'extra-finish'(el) {
+    finishExtras(state, sessionAt(Number(el.dataset.index)));
+    ui.extraOpen = null;
+    save();
+    rest.stop();
+    render();
+  },
   'extra-skip'(el) {
     const session = sessionAt(Number(el.dataset.index));
     const e = exerciseById(el.dataset.exercise);
@@ -1566,6 +1664,20 @@ const ACTIONS = {
     state.exercises = state.exercises.filter((x) => x !== e);
     save();
     exerciseSheet.close();
+    render();
+  },
+  'past-new'() {
+    openPast(null);
+  },
+  'past-edit'(el) {
+    openPast(Number(el.dataset.past));
+  },
+  'past-delete'() {
+    const p = state.pastMaxes[ui.past];
+    if (!confirm(`Delete your ${shortDate(p.date)} ${LIFTS.find((l) => l.id === p.lift).short.toLowerCase()} max of ${fmt(p.value)}?`)) return;
+    state.pastMaxes = state.pastMaxes.filter((x) => x !== p);
+    save();
+    pastSheet.close();
     render();
   },
   'exercise-open'(el) {
@@ -1686,7 +1798,7 @@ document.addEventListener('submit', (e) => {
 
 document.addEventListener('change', (e) => {
   // Only the app's own settings controls; fields in sheets and forms are read when they're submitted.
-  if (e.target.closest('dialog, #exercise-form, #bodyweight-form, #review-form, .max-form, .sync-form')) return;
+  if (e.target.closest('dialog, #exercise-form, #past-form, #bodyweight-form, #review-form, .max-form, .sync-form')) return;
   const { name, value } = e.target;
   if (name === 'unit') {
     if (state.blocks.length === 0) {

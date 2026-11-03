@@ -221,6 +221,39 @@ main {
   margin-top: 22px;
 }
 
+/* The day a max was set, under its number. */
+.date-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.date-input {
+  min-height: 36px;
+  padding: 4px 0;
+  border: 0;
+  border-bottom: 2px dashed var(--steel);
+  background: none;
+  color: var(--chalk);
+  color-scheme: dark;
+  font: 600 16px var(--text);
+}
+
+.date-input:focus {
+  outline: none;
+  border-bottom-style: solid;
+  border-bottom-color: var(--chalk);
+}
+
+.field-row .date-input {
+  border-bottom: 0;
+}
+
+.max-row > .field-note {
+  margin-top: 6px;
+}
+
 .text-input {
   width: 100%;
   min-width: 0;
@@ -914,15 +947,38 @@ legend.setting-title + * {
   border-bottom: 1px solid var(--line);
 }
 
-/* A closed accessory is one line: name, a light per set, and today's or last time's sets. */
+/* A closed accessory is one line: name, a light per set, and today's or last time's sets, with a skip
+   beside it. A superset has a line per exercise under its tag. */
+.extra-top {
+  display: grid;
+  padding: 6px 0;
+}
+
+.extra-line {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
 .extra-row {
   display: grid;
   gap: 10px;
   width: 100%;
-  padding: 14px 0;
+  padding: 8px 0;
   border: 0;
   background: none;
   text-align: left;
+}
+
+.row-skip {
+  align-self: stretch;
+  min-width: 44px;
+  padding: 0 0 0 16px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .row-line {
@@ -974,8 +1030,8 @@ legend.setting-title + * {
   color: var(--steel);
 }
 
-.extra.is-open .extra-row {
-  padding-bottom: 8px;
+.extra.is-open .extra-top {
+  padding-bottom: 0;
 }
 
 .extra-body {
@@ -991,6 +1047,7 @@ legend.setting-title + * {
 /* A superset: both halves under one bracket on the left. */
 .superset-tag {
   justify-self: start;
+  margin-top: 8px;
   padding: 1px 8px;
   border: 1px solid var(--steel);
   border-radius: 10px;
@@ -999,7 +1056,7 @@ legend.setting-title + * {
   font-weight: 700;
 }
 
-.is-superset .extra-row,
+.is-superset .extra-top,
 .is-superset .extra-body {
   padding-left: 12px;
   border-left: 3px solid var(--steel);
@@ -1110,9 +1167,16 @@ legend.setting-title + * {
   margin-top: 6px;
 }
 
-.extras > .btn-quiet {
+.extras-end {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 18px;
   margin-top: 8px;
-  padding-left: 0;
+}
+
+.extras-end .btn-quiet {
+  padding: 0;
 }
 
 .block-end {
@@ -1194,9 +1258,32 @@ legend.setting-title + * {
   color: var(--gain);
 }
 
-/* Each max a lift has trained from, newest first, with the day it was set. */
+/* Each max a lift has had, newest first, with the day it was set. */
 .max-dates {
   margin-top: 8px;
+}
+
+/* An earlier max, entered by hand, opens to be changed; its date is underlined like other editable values. */
+.h-edit {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.h-edit .h-when {
+  justify-self: start;
+  width: fit-content;
+  border-bottom: 2px dashed var(--steel);
+}
+
+.past-add {
+  margin-top: 6px;
+  padding-left: 0;
 }
 
 .h-when {

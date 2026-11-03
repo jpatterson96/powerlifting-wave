@@ -1,6 +1,6 @@
 // Accessory exercises: the lifter's own list, logged with each training day and progressed by rep range
 // (double progression). No DOM access here so it can be tested in Node.
-import { estimateMax, tidy } from './logic.js';
+import { LIFTS, estimateMax, tidy } from './logic.js';
 
 export const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 export const EXTRA_DEFAULTS = { sets: 3, low: 8, high: 12, rest: 90 };
@@ -75,6 +75,21 @@ export function ensureEntry(session, exercise, variant) {
 }
 
 const done = (entry) => !entry.skipped && entry.sets.some(Boolean);
+
+// Ends a training day's accessories: one not started is skipped, and one stopped partway keeps just the
+// sets logged. Returns how many it changed.
+export function finishExtras(state, session) {
+  let changed = 0;
+  for (const e of dayExtras(state, session)) {
+    const entry = entryOf(session, e.id);
+    if (entry?.skipped || (entry && entry.sets.every(Boolean))) continue;
+    const logged = entry ? entry.sets.filter(Boolean) : [];
+    if (logged.length) entry.sets = logged;
+    else ensureEntry(session, e, entry?.variant ?? defaultVariant(state, e)).skipped = true;
+    changed++;
+  }
+  return changed;
+}
 
 // Every logged appearance of one exercise, oldest first: imported workouts, then the blocks in order.
 // `at` is [block, week, session] for logs made in the app, so "last time" can be found from any day.
@@ -179,8 +194,11 @@ const validSet = (s) => s === null || (Boolean(s) && typeof s.weight === 'number
 const validEntry = (x) => Boolean(x) && typeof x.exercise === 'string' && (x.variant === null || text(x.variant, 40)) &&
   typeof x.skipped === 'boolean' && Array.isArray(x.sets) && x.sets.length <= 20 && x.sets.every(validSet);
 
-// Drops anything malformed in the accessory data instead of rejecting the whole log, and fills in the
-// fields older logs don't have.
+const LIFT_IDS = LIFTS.map((l) => l.id);
+const validMax = (n) => typeof n === 'number' && n > 0 && n < 5000;
+
+// Drops anything malformed in the optional data (accessories, body weight, earlier maxes and the days maxes
+// were set) instead of rejecting the whole log, and fills in the fields older logs don't have.
 export function cleanExtras(state) {
   state.exercises = Array.isArray(state.exercises) ? state.exercises.filter(validExercise) : [];
   state.bodyweight = Array.isArray(state.bodyweight)
@@ -189,7 +207,17 @@ export function cleanExtras(state) {
     state.imported = Array.isArray(state.imported)
       ? state.imported.filter((w) => w && isDate(w.date) && Array.isArray(w.extras)).map((w) => ({ ...w, extras: w.extras.filter(validEntry) })) : [];
   }
+  if (state.pastMaxes !== undefined) {
+    state.pastMaxes = Array.isArray(state.pastMaxes)
+      ? state.pastMaxes.filter((p) => p && isDate(p.date) && LIFT_IDS.includes(p.lift) && validMax(p.value)) : [];
+  }
   for (const b of state.blocks) {
+    if (b.maxDates !== undefined) {
+      const dates = b.maxDates && typeof b.maxDates === 'object'
+        ? Object.fromEntries(LIFT_IDS.filter((id) => isDate(b.maxDates[id])).map((id) => [id, b.maxDates[id]])) : {};
+      if (Object.keys(dates).length) b.maxDates = dates;
+      else delete b.maxDates;
+    }
     for (const week of b.log) {
       for (const s of week) {
         if (s.extras !== undefined) s.extras = Array.isArray(s.extras) ? s.extras.filter(validEntry) : [];

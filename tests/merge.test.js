@@ -30,6 +30,13 @@ test('lists both sides changed are joined, keeping the phone copy of shared item
   assert.deepEqual(merged.bodyweight, [{ date: '2026-11-01', weight: 201 }, { date: '2026-11-03', weight: 200 }]);
 });
 
+test('earlier maxes entered on both sides are joined by day and lift', () => {
+  const base = log({});
+  const local = log({ pastMaxes: [{ date: '2025-01-05', lift: 'bench', value: 300 }] });
+  const remote = log({ pastMaxes: [{ date: '2024-02-01', lift: 'bench', value: 285 }, { date: '2025-01-05', lift: 'bench', value: 295 }] });
+  assert.deepEqual(mergeLogs(base, local, remote).pastMaxes.map((p) => p.value), [285, 300]);
+});
+
 test('without a record of the last match, the training log stays and lists are joined', () => {
   const local = log({ blocks: [{ tag: 'phone' }], exercises: [] });
   const remote = log({ blocks: [{ tag: 'older copy' }], exercises: [ex('g01'), ex('g02')] });

@@ -101,7 +101,11 @@ Your own exercises, listed under each day's main lift. **Settings → Accessorie
 days, sets, rep range (e.g. 3 × 8–12), weight jump and rest; **Add an exercise** on a training day
 adds one to that day only.
 
-- **Skip today** for anything you don't do that day; nothing is counted against it.
+- **Skip** on an accessory's line (or **Skip today** inside it) for anything you don't do that day;
+  nothing is counted against it. **Undo** brings it back.
+- **Skip the rest** ends the day's accessories: anything not started is skipped, and anything stopped
+  partway keeps just the sets you logged. A day also ends this way by itself once you log on a later
+  day.
 - **Add a set** and **Remove a set** change today's sets only. Remove takes off the last set not
   done yet, or asks before removing a logged one.
 - Exercises with variants (e.g. *Dumbbell, Machine*) have a switch; each variant keeps its own
@@ -120,9 +124,11 @@ Apple Health isn't reachable from a web app, so body weight is logged in the app
 - weekly volume (weight × reps).
 
 Tap or drag across a chart for a week's numbers; the same numbers are in "week by week" below it.
-Below the max chart, every max the lift has trained from is listed with the day it was set: each
-block's starting max (the day the block started) and any change from a week 3 test set (the day it
-was logged). Settings → Current maxes shows the same dates.
+Below the max chart, every max the lift has had is listed with the day it was set: maxes from before
+the app, each block's starting max, and any change from a week 3 test set (the day it was logged).
+**Add an earlier max** records one from before the app (tap it later to change or delete it), and a
+chart of all of them by date appears. A block's maxes are dated the day it started; set the day you
+actually hit them in Settings → Current maxes.
 
 **Accessories**: each exercise's heaviest set, estimated max, best session, a chart of its best set
 by session, and recent sessions. **Body**: log today's weight and see it charted.

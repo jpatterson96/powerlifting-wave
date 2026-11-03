@@ -11,6 +11,7 @@ import {
   suggestion, sessionBest, records, muscleSets, workoutTime, timedSessions, logBodyweight, cleanExtras,
 } from './extras.js';
 import { mergeLogs } from './merge.js';
+import { press, typed, nudge } from './pad.js';
 import * as sync from './sync.js';
 import * as rest from './rest.js';
 import { maxChart, volumeChart, progressChart } from './charts.js';
@@ -22,8 +23,6 @@ const toastEl = document.getElementById('toast');
 const repsSheet = document.getElementById('reps-sheet');
 const repGrid = document.getElementById('rep-grid');
 const weightSheet = document.getElementById('weight-sheet');
-const weightInput = document.getElementById('weight-input');
-const repsWeight = document.getElementById('reps-weight');
 const pickSheet = document.getElementById('pick-sheet');
 const exerciseSheet = document.getElementById('exercise-sheet');
 const exerciseForm = document.getElementById('exercise-form');
@@ -40,6 +39,8 @@ const ui = {
   history: 'lifts', exercise: null, variant: null, editing: null, past: null, muscleWeek: null,
   // The accessory (or superset) opened on the shown day, by its first exercise's id; undefined picks one under way.
   extraOpen: undefined,
+  // The weight being typed on the app's keypad in a sheet; see startPad.
+  pad: null,
 };
 // The numbers behind each History chart, by its data-chart name, for the tooltips.
 const chartData = {};
@@ -1417,11 +1418,68 @@ function testNews(session) {
   return `Estimated ${lift.short.toLowerCase()} max: ${estimate}. ${b.finish === 'remax' ? 'Your re-max attempts build from it.' : 'It sets your next block’s max.'}`;
 }
 
+// ---------- The keypad ----------
+// Weights in sheets are typed on the app's own keys, laid out like the phone's number pad with a tall key for
+// what comes next, so the phone's keyboard never comes up over a sheet. Built once into each sheet's .pad.
+
+function buildPads() {
+  const key = (k, label, cls) => `<button class="pad-key${cls ? ` ${cls}` : ''}" data-action="pad-key" data-key="${k}"${label ? ` aria-label="${label}"` : ''}>${k === 'back' ? '⌫' : k}</button>`;
+  for (const pad of document.querySelectorAll('.pad')) {
+    pad.innerHTML = `${['7', '8', '9', '4', '5', '6', '1', '2', '3'].map((k) => key(k)).join('')}
+      ${key('.', 'Decimal point', 'pad-point')}${key('0')}${key('back', 'Delete', 'pad-back')}
+      <button class="pad-key pad-done" data-action="pad-done">${pad.dataset.done}</button>`;
+  }
+  for (const load of document.querySelectorAll('.load')) {
+    load.innerHTML = `
+      <button class="load-value" data-action="pad-open">
+        <span class="load-num" aria-live="polite"></span><span class="load-caret" aria-hidden="true"></span><span class="field-unit"></span>
+      </button>
+      <button class="step-key" data-action="pad-nudge" data-dir="-1"></button>
+      <button class="step-key" data-action="pad-nudge" data-dir="1"></button>`;
+  }
+}
+
+// Sets the keypad up for a sheet. `value` is the weight it opens with (null for none), shown as if selected:
+// typing replaces it. `text` is what's been typed, kept as typed so "12." shows that way. `open` is whether
+// the keys are showing: always in the weight sheet, in place of the reps in the set sheet. `step` is what
+// the − and + keys move by; `decimals` is off for weights counted in plates a side.
+function startPad(host, value, { step, decimals = true, unit = state.unit, open = true }) {
+  ui.pad = { host, text: value === null ? '' : fmt(value), fresh: value !== null, step, decimals, unit, open };
+}
+
+const padSheet = () => (ui.pad.host === 'reps' ? repsSheet : weightSheet);
+const padValue = () => typed(ui.pad.text);
+
+// Redraws the number being typed and the keys in place, so a tapped key keeps focus.
+function renderPad() {
+  const p = ui.pad;
+  const sheet = padSheet();
+  const value = padValue();
+  const field = sheet.querySelector('.load-value');
+  field.classList.toggle('is-live', p.open);
+  field.classList.toggle('is-fresh', p.open && p.fresh && p.text !== '');
+  field.setAttribute('aria-label', value === null ? 'No weight yet. Tap to type one.' : `${fmt(value)} ${p.unit}. Tap to type another.`);
+  sheet.querySelector('.load-num').textContent = p.open ? p.text : value === null ? '' : fmt(value);
+  sheet.querySelector('.load .field-unit').textContent = p.unit;
+  for (const key of sheet.querySelectorAll('.step-key')) {
+    const up = key.dataset.dir === '1';
+    key.textContent = `${up ? '+' : '−'}${fmt(p.step)}`;
+    key.setAttribute('aria-label', `${up ? 'Up' : 'Down'} ${fmt(p.step)}`);
+    key.disabled = !up && !(value > 0);
+  }
+  sheet.querySelector('.pad').hidden = !p.open;
+  sheet.querySelector('.pad-point').disabled = !p.decimals;
+  if (p.host === 'reps') repGrid.hidden = p.open;
+}
+
 function openReps(index, set) {
   const session = sessionAt(index);
   const current = session.reps[set];
   ui.sheet = { index, set };
+  ui.pad = null;
   document.getElementById('reps-weight-field').hidden = true;
+  repsSheet.querySelector('.pad').hidden = true;
+  repGrid.hidden = false;
   repGrid.classList.toggle('is-judging', session.kind === 'max');
   if (session.kind === 'max') {
     const weight = setWeight(block(), session, ui.week, set, state);
@@ -1457,13 +1515,14 @@ function openExtra(index, id, set) {
     ? `${e.low}–${e.high} reps. Count the ${PLATE[state.unit]} ${state.unit} plates on one side, then tap the reps you did.`
     : `${e.low}–${e.high} reps. Set the weight (0 for body weight), then tap the reps you did.`;
   document.getElementById('reps-weight-field').hidden = false;
-  document.getElementById('reps-weight-unit').textContent = loadUnit(e);
-  const weight = current?.weight ?? target.weight ?? entry?.sets.filter(Boolean).pop()?.weight;
-  repsWeight.value = weight === undefined || weight === null ? '' : fmt(weight);
+  const weight = current?.weight ?? target.weight ?? entry?.sets.filter(Boolean).pop()?.weight ?? null;
+  // With no weight to go on, the keys come up first; otherwise the reps do, and a tap on the weight brings them up.
+  startPad('reps', weight, { step: e.step, decimals: !isCounted(e), unit: loadUnit(e), open: weight === null });
   repGrid.classList.remove('is-judging');
   repGrid.innerHTML = Array.from({ length: e.high + 6 }, (_, n) => `
     <button class="rep${n === target.reps ? ' is-target' : ''}" data-action="reps-pick" data-reps="${n}"
       aria-pressed="${n === current?.reps}">${n}</button>`).join('');
+  renderPad();
   repsSheet.showModal();
 }
 
@@ -1587,8 +1646,8 @@ function openWeight(index, attempt) {
   document.getElementById('weight-note').textContent = attempt === undefined
     ? `Target ${fmt(target)} ${state.unit}. Change it if you loaded something different.`
     : `Suggested ${fmt(target)} ${state.unit}. Change it to the weight you'll take.`;
-  document.getElementById('weight-unit').textContent = state.unit;
-  weightInput.value = fmt(current ?? target);
+  startPad('weight', current ?? target, { step: state.round });
+  renderPad();
   weightSheet.showModal();
 }
 
@@ -1866,8 +1925,12 @@ const ACTIONS = {
   'reps-pick'(el) {
     rest.prime();
     if (ui.sheet.exercise) {
-      const weight = tidy(parseFloat(repsWeight.value));
-      if (repsWeight.value.trim() === '' || !(weight >= 0)) return toast('Enter the weight first. Use 0 for body weight.');
+      const weight = padValue();
+      if (weight === null) {
+        Object.assign(ui.pad, { open: true, fresh: false });
+        renderPad();
+        return toast('Enter the weight first. Use 0 for body weight.');
+      }
       logExtra(ui.sheet.index, exerciseById(ui.sheet.exercise), ui.sheet.set, { weight, reps: Number(el.dataset.reps) });
       repsSheet.close();
       render();
@@ -1891,14 +1954,35 @@ const ACTIONS = {
   weight(el) {
     openWeight(Number(el.dataset.index), el.dataset.attempt === undefined ? undefined : Number(el.dataset.attempt));
   },
-  'weight-save'() {
-    // Checked after rounding: a weight that rounds to 0 would make the saved log fail its check on the next load.
-    const v = tidy(parseFloat(weightInput.value));
-    if (!(v > 0)) return toast('Enter a weight above 0.');
-    saveWeight(v);
-  },
   'weight-reset'() {
     saveWeight(null);
+  },
+  // A tap on the weight brings the keys up (in the set sheet) and selects the number, so typing starts over.
+  'pad-open'() {
+    Object.assign(ui.pad, { open: true, fresh: ui.pad.text !== '' });
+    renderPad();
+  },
+  'pad-key'(el) {
+    ui.pad.text = press(ui.pad.text, el.dataset.key, ui.pad);
+    ui.pad.fresh = false;
+    renderPad();
+  },
+  // A step gives a whole number again, so typing after it starts over rather than adding digits to it.
+  'pad-nudge'(el) {
+    Object.assign(ui.pad, { text: fmt(nudge(padValue(), ui.pad.step, Number(el.dataset.dir))), fresh: true });
+    renderPad();
+  },
+  // Done typing: the bar weight is saved, an accessory's weight is kept and the reps come back.
+  'pad-done'() {
+    const v = padValue();
+    if (ui.pad.host === 'weight') {
+      // Checked after rounding: a weight that rounds to 0 would make the saved log fail its check on the next load.
+      if (!(v > 0)) return toast('Enter a weight above 0.');
+      return saveWeight(v);
+    }
+    if (v === null) return toast('Enter the weight first. Use 0 for body weight.');
+    Object.assign(ui.pad, { text: fmt(v), fresh: true, open: false });
+    renderPad();
   },
   // One tap logs an accessory set as planned once its weight is known; otherwise it asks.
   'extra-set'(el) {
@@ -2228,11 +2312,15 @@ window.addEventListener('resize', () => {
   if (ui.tab === 'history' && state.blocks.length) render();
 });
 
-weightInput.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter') return;
-  // Without this, the same Enter also presses the weight button that gets focus back after the sheet closes.
+// A hardware keyboard types on the keypad too, while it's up.
+document.addEventListener('keydown', (e) => {
+  if (!ui.pad?.open || !padSheet().open || e.metaKey || e.ctrlKey || e.altKey) return;
+  const key = e.key === 'Backspace' ? 'back' : e.key;
+  if (key !== 'Enter' && key !== 'back' && !/^[0-9.]$/.test(key)) return;
+  // Without this, the same Enter also presses the button that gets focus back after the sheet closes.
   e.preventDefault();
-  ACTIONS['weight-save']();
+  if (key === 'Enter') ACTIONS['pad-done']();
+  else ACTIONS['pad-key']({ dataset: { key } });
 });
 
 // Switching an exercise to or from plates a side changes what its weight jump is counted in.
@@ -2252,6 +2340,7 @@ restoreInput.addEventListener('change', () => {
   if (file) restore(file);
 });
 
+buildPads();
 render();
 if (state.blocks.length) requestPersist();
 rest.setMode(state.rest);

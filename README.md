@@ -93,7 +93,8 @@ the background) and follow the ring/silent switch: getting past it would mean st
 **Settings → Rest timer** sets Sound, Silent or Off.
 
 Every logged set records the weight lifted, so changing a setting or a max later never rewrites past
-results.
+results. A weight is typed on the app's own keypad in the sheet, with − and + keys for one jump
+(the exercise's, or the rounding step on the bar), so the phone's keyboard never comes up over it.
 
 ## Accessories
 

@@ -47,14 +47,12 @@
     <div class="sheet-body">
       <h2 class="sheet-title" id="reps-title"></h2>
       <p class="sheet-note" id="reps-note"></p>
-      <label class="field sheet-weight" id="reps-weight-field" hidden>
-        <span class="field-label">Weight</span>
-        <span class="field-row">
-          <input class="num-input" id="reps-weight" type="number" inputmode="decimal" step="any" min="0">
-          <span class="field-unit" id="reps-weight-unit"></span>
-        </span>
-      </label>
+      <div class="field sheet-weight" id="reps-weight-field" hidden>
+        <span class="field-label" id="reps-weight-label">Weight</span>
+        <div class="load" aria-labelledby="reps-weight-label"></div>
+      </div>
       <div class="rep-grid" id="rep-grid"></div>
+      <div class="pad" role="group" aria-label="Keypad" data-done="Done" hidden></div>
       <div class="sheet-actions">
         <button class="btn-quiet" data-action="reps-clear">Clear set</button>
         <button class="btn-quiet" data-action="sheet-close">Cancel</button>
@@ -66,16 +64,14 @@
     <div class="sheet-body">
       <h2 class="sheet-title" id="weight-title"></h2>
       <p class="sheet-note" id="weight-note"></p>
-      <label class="field">
-        <span class="field-label">Weight on the bar</span>
-        <span class="field-row">
-          <input class="num-input" id="weight-input" type="number" inputmode="decimal" step="any" min="0">
-          <span class="field-unit" id="weight-unit"></span>
-        </span>
-      </label>
+      <div class="field sheet-weight">
+        <span class="field-label" id="weight-label">Weight on the bar</span>
+        <div class="load" aria-labelledby="weight-label"></div>
+      </div>
+      <div class="pad" role="group" aria-label="Keypad" data-done="Save"></div>
       <div class="sheet-actions">
         <button class="btn-quiet" data-action="weight-reset">Use target</button>
-        <button class="btn" data-action="weight-save">Save weight</button>
+        <button class="btn-quiet" data-action="sheet-close">Cancel</button>
       </div>
     </div>
   </dialog>

@@ -1912,6 +1912,142 @@ legend.setting-title + * {
   color: var(--ink);
 }
 
+/* ---------- The keypad: a weight typed on the app's own keys, set out like the phone's number pad ---------- */
+
+.rep-grid[hidden],
+.pad[hidden],
+.sheet-weight[hidden] {
+  display: none;
+}
+
+/* The number on its dashed blank, with a step down and up beside it. A tap on the blank brings the keys up. */
+.load {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.load-value {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 2px 0 4px;
+  border: 0;
+  border-bottom: 2px dashed var(--steel);
+  border-radius: 0;
+  background: none;
+  text-align: left;
+}
+
+.load-value.is-live {
+  border-bottom-style: solid;
+  border-bottom-color: var(--chalk);
+}
+
+.load-num {
+  font: 700 40px/1.1 var(--display);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The number the sheet opened with shows as selected: the next key replaces it. */
+.is-fresh .load-num {
+  margin: 0 -4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(238, 241, 244, 0.24);
+}
+
+.load-caret {
+  display: none;
+  flex: none;
+  align-self: center;
+  width: 2px;
+  height: 36px;
+  background: var(--chalk);
+  animation: caret 1.1s linear infinite;
+}
+
+.is-live:not(.is-fresh) .load-caret {
+  display: block;
+}
+
+@keyframes caret {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.step-key {
+  flex: none;
+  min-width: 56px;
+  height: 44px;
+  padding: 0 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--chalk);
+  font: 700 20px/1 var(--display);
+  font-variant-numeric: tabular-nums;
+}
+
+.step-key:active {
+  background: var(--line);
+}
+
+.step-key:disabled {
+  color: var(--steel);
+  cursor: default;
+}
+
+.pad {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 56px;
+  gap: 10px;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.pad-key {
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  font: 700 28px/1 var(--display);
+}
+
+.pad-key:active {
+  background: var(--line);
+}
+
+.pad-key:disabled {
+  color: var(--steel);
+  cursor: default;
+}
+
+.pad-back {
+  font-size: 24px;
+}
+
+/* The tall key on the right: what comes after the number. */
+.pad-done {
+  grid-column: 4;
+  grid-row: 1 / span 4;
+  border-color: var(--chalk);
+  background: var(--chalk);
+  color: var(--ink);
+  font-size: 22px;
+}
+
+.pad-done:active {
+  background: var(--chalk);
+  transform: scale(0.98);
+}
+
 .sheet-actions {
   display: flex;
   align-items: center;

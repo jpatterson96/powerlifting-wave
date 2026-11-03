@@ -12,6 +12,7 @@ import {
 } from './extras.js';
 import { mergeLogs } from './merge.js';
 import { press, typed, nudge } from './pad.js';
+import { PICS, picFor, picFile } from './pics.js';
 import * as sync from './sync.js';
 import * as rest from './rest.js';
 import { maxChart, volumeChart, progressChart } from './charts.js';
@@ -98,6 +99,12 @@ const loadUnit = (e) => (isCounted(e) ? 'plates a side' : state.unit);
 // An estimated max in the exercise's own terms: a whole weight, or plates to a tenth.
 const estText = (e, v) => (isCounted(e) ? `${fmt(Math.round(v * 10) / 10)} plates` : fmt(Math.round(v)));
 const exerciseById = (id) => state.exercises.find((e) => e.id === id);
+// The picture beside an accessory, a mask that takes the text colour. With nothing to show, an empty slot keeps rows lined up.
+function picHTML(e, variant = null, cls = '') {
+  const key = picFor(e, variant);
+  const classes = `pic${key ? '' : ' is-none'}${cls ? ` ${cls}` : ''}`;
+  return `<i class="${classes}"${key ? ` style="--pic:url('${picFile(key)}')"` : ''} aria-hidden="true"></i>`;
+}
 
 // "50 × 12, 12, 10" when the weight holds, "50 × 12, 55 × 10" when it changes.
 function setsText(sets, e = null) {
@@ -551,7 +558,7 @@ function rowLine(session, i, e) {
     : done.length ? `${done.length === count ? plural(count, 'set') : `${done.length} of ${count} sets`}: ${setsText(done, e)}`
       : last ? `${range}. Last ${setsText(last.sets, e)}` : `${range}. New`;
   const dots = entry?.skipped ? '' : Array.from({ length: count }, (_, s) => `<i class="dot${entry?.sets[s] ? ' is-on' : ''}"></i>`).join('');
-  return `<span class="row-line${entry?.skipped ? ' is-skipped' : ''}">
+  return `${picHTML(e, variant, entry?.skipped ? 'is-dim' : '')}<span class="row-line${entry?.skipped ? ' is-skipped' : ''}">
     <span class="row-name">${esc(e.name)}${variant ? ` <span class="row-variant">${esc(variant)}</span>` : ''}</span>
     <span class="row-dots" aria-hidden="true">${dots}</span>
     <span class="row-sum">${summary}</span>
@@ -573,7 +580,7 @@ function groupView(session, i, group, open) {
   if (open && pair) {
     const counts = group.map((e, k) => (all[k]?.skipped ? 0 : setCount(e, all[k])));
     const next = supersetOrder(counts).find(({ which, set }) => !all[which]?.sets[set]);
-    heading = toggle(`<span class="round-line">${next ? `Round ${next.set + 1} of ${Math.max(...counts)}` : 'Every round done'}: ${group.map((e) => esc(e.name)).join(' + ')}</span>`, key);
+    heading = toggle(`${picHTML(group[0])}<span class="round-line">${next ? `Round ${next.set + 1} of ${Math.max(...counts)}` : 'Every round done'}: ${group.map((e) => esc(e.name)).join(' + ')}</span>`, key);
   } else if (open) {
     heading = toggle(rowLine(session, i, group[0]), key);
   }
@@ -1058,9 +1065,9 @@ function extrasHistory() {
     const meta = last
       ? `Last ${last.date ? shortDate(last.date) : 'logged'}: ${setsText(last.sets, e)}${best ? `. Est. max ${estText(e, best.value)}` : ''}`
       : 'Not logged yet';
-    return `<li><button class="index-row" data-action="exercise-open" data-exercise="${e.id}">
+    return `<li><button class="index-row" data-action="exercise-open" data-exercise="${e.id}">${picHTML(e)}<span class="index-text">
       <span class="index-name">${esc(e.name)}</span><span class="index-meta">${meta}</span>
-    </button></li>`;
+    </span></button></li>`;
   }).join('');
   return `<ul class="index-list">${rows}</ul>`;
 }
@@ -1294,10 +1301,10 @@ function exercisesSection() {
     const partner = exerciseById(e.link) ?? state.exercises.find((x) => x.link === e.id);
     const variants = `${e.variants.length ? `. ${e.variants.map(esc).join(' or ')}` : ''}${partner ? `. Superset with ${esc(partner.name)}` : ''}`;
     return `<li class="exercise-row">
-      <button class="index-row" data-action="exercise-edit" data-exercise="${e.id}" data-key="exercise-edit-${e.id}">
+      <button class="index-row" data-action="exercise-edit" data-exercise="${e.id}" data-key="exercise-edit-${e.id}">${picHTML(e)}<span class="index-text">
         <span class="index-name">${esc(e.name)}</span>
         <span class="index-meta">${e.sets} × ${e.low}–${e.high}, ${days}${e.muscle ? `. ${e.muscle}` : ''}${isCounted(e) ? '. In plates a side' : ''}${variants}</span>
-      </button>
+      </span></button>
       <button class="icon-btn" data-action="exercise-move" data-exercise="${e.id}" data-by="-1" data-key="exercise-up-${e.id}"
         aria-label="Move ${esc(e.name)} up"${i === 0 ? ' disabled' : ''}>↑</button>
       <button class="icon-btn" data-action="exercise-move" data-exercise="${e.id}" data-by="1" data-key="exercise-down-${e.id}"
@@ -1309,6 +1316,7 @@ function exercisesSection() {
     <p class="hint">Your exercises, the days they show up on, and their rep ranges. They're listed under each day's main lift in this order.</p>
     ${rows ? `<ol class="index-list">${rows}</ol>` : ''}
     <button class="btn" data-action="exercise-new">Add an exercise</button>
+    <p class="hint credit">Exercise pictures by <a href="https://www.flaticon.com/authors/leremy" target="_blank" rel="noopener">Leremy</a>, from <a href="https://www.flaticon.com/" target="_blank" rel="noopener">Flaticon</a>.</p>
   </section>`;
 }
 
@@ -1575,9 +1583,9 @@ function openPick(index) {
   if (!others.length) return openEditor(null, index);
   document.getElementById('pick-note').textContent = `Adds it to this ${session.day} only. To have it every week, set its days in Settings.`;
   document.getElementById('pick-list').innerHTML = others.map((e) => `
-    <button class="index-row" data-action="extra-pick" data-exercise="${e.id}">
+    <button class="index-row" data-action="extra-pick" data-exercise="${e.id}">${picHTML(e)}<span class="index-text">
       <span class="index-name">${esc(e.name)}</span><span class="index-meta">${e.sets} × ${e.low}–${e.high}</span>
-    </button>`).join('');
+    </span></button>`).join('');
   pickSheet.showModal();
 }
 
@@ -1628,8 +1636,18 @@ function openEditor(id, index = null) {
   document.getElementById('exercise-link').innerHTML = `<option value="">None</option>${state.exercises
     .filter((x) => x !== e)
     .map((x) => `<option value="${x.id}"${x.id === partner ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}`;
+  document.getElementById('exercise-pics').innerHTML = picChoices(e?.pic ?? null, e?.name ?? '');
   pickSheet.close();
   exerciseSheet.showModal();
+}
+
+// The editor's picture choices: Auto, showing what the name gives, then every picture there is.
+function picChoices(chosen, name) {
+  const auto = picFor({ name });
+  const option = (value, label, key, checked, id = '') => `<label class="pic-box"><input type="radio" name="pic" value="${value}"${checked ? ' checked' : ''}>
+    <span><i class="pic${key ? '' : ' is-none'}"${id ? ` id="${id}"` : ''}${key ? ` style="--pic:url('${picFile(key)}')"` : ''} aria-hidden="true"></i><small>${esc(label)}</small></span></label>`;
+  const known = PICS.some(([key]) => key === chosen);
+  return [option('', 'Auto', auto, !known, 'pic-auto'), ...PICS.map(([key, label]) => option(key, label, key, chosen === key))].join('');
 }
 
 function openWeight(index, attempt) {
@@ -1806,7 +1824,9 @@ const FORMS = {
     // Counted in plates a side is its own switch; the plate math modes are mutually exclusive with it.
     const counted = f.plates.value === 'count';
     const plates = !counted && Object.hasOwn(LOADS, f.plates.value) ? f.plates.value : null;
-    const fields = { name, variants, sets, low, high, step, rest, days, muscle, plates, counted };
+    // A picture picked by hand stays; Auto stores nothing, so a renamed exercise follows its new name.
+    const pic = PICS.some(([key]) => key === f.pic.value) ? f.pic.value : null;
+    const fields = { name, variants, sets, low, high, step, rest, days, muscle, plates, counted, pic };
     const { id, index } = ui.editing;
     let e = id ? exerciseById(id) : null;
     if (e) {
@@ -2321,6 +2341,15 @@ document.addEventListener('keydown', (e) => {
   e.preventDefault();
   if (key === 'Enter') ACTIONS['pad-done']();
   else ACTIONS['pad-key']({ dataset: { key } });
+});
+
+// The Auto picture follows the name as it's typed.
+exerciseForm.elements.name.addEventListener('input', (e) => {
+  const auto = picFor({ name: e.target.value });
+  const el = document.getElementById('pic-auto');
+  if (!el) return;
+  el.className = `pic${auto ? '' : ' is-none'}`;
+  el.style.setProperty('--pic', auto ? `url('${picFile(auto)}')` : 'none');
 });
 
 // Switching an exercise to or from plates a side changes what its weight jump is counted in.

@@ -1,6 +1,7 @@
 // Accessory exercises: the lifter's own list, logged with each training day and progressed by rep range
 // (double progression). No DOM access here so it can be tested in Node.
 import { LIFTS, BAR, FINISH_WEEK, estimateMax, tidy } from './logic.js';
+import { picKeys } from './pics.js';
 
 export const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 export const EXTRA_DEFAULTS = { sets: 3, low: 8, high: 12, rest: 90 };
@@ -289,9 +290,10 @@ const isTime = (t) => typeof t === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\
 const text = (s, max) => typeof s === 'string' && s.trim().length > 0 && s.length <= max;
 const int = (n, lo, hi) => Number.isInteger(n) && n >= lo && n <= hi;
 
-// A muscle, plate or counted setting that isn't one of the choices is dropped, keeping the exercise.
+// A muscle, plate, counted or picture setting that isn't one of the choices is dropped, keeping the exercise.
 function cleanChoices(e) {
   if (e && e.muscle !== undefined && e.muscle !== null && !MUSCLES.includes(e.muscle)) delete e.muscle;
+  if (e && e.pic !== undefined && e.pic !== null && !(typeof e.pic === 'string' && picKeys.has(e.pic))) delete e.pic;
   if (e && e.plates !== undefined && e.plates !== null && !(typeof e.plates === 'string' && Object.hasOwn(LOADS, e.plates))) delete e.plates;
   if (e && e.counted !== undefined && typeof e.counted !== 'boolean') delete e.counted;
   return e;

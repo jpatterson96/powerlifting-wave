@@ -123,6 +123,10 @@ adds one to that day only.
   of 45 lb / 20 kg plates on each side instead of a weight. Its weight jump is in plates, and volume
   counts every plate on both sides.
 - Each exercise names the muscle it counts toward, for the weekly set count in History.
+- Each exercise shows a stick-figure picture beside its name, picked from the name (and the variant in use);
+  the editor's **Picture** row lets you choose another. The pictures are by
+  [Leremy](https://www.flaticon.com/authors/leremy) (Gan Khoon Lay), from his gym packs on
+  [Flaticon](https://www.flaticon.com/), used under the Flaticon free licence with this credit.
 
 Once a day's lift and accessories are all done or skipped, a summary closes the day: the lift's sets
 (and the estimated max from a test set), accessories done and skipped, total volume, any new bests

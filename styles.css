@@ -715,6 +715,28 @@ legend.setting-title + * {
   color: var(--steel);
 }
 
+/* The workout clock under the day's name: Start workout, then the time running, then how long it took. */
+.day-start {
+  min-height: 36px;
+  margin: -8px 0 10px;
+  padding: 0;
+  color: var(--chalk);
+}
+
+.day-time {
+  margin: -6px 0 12px;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.day-reopen {
+  min-height: 0;
+  padding: 0 0 0 6px;
+  font-size: 15px;
+}
+
 .session-body {
   padding: 0 0 26px;
 }
@@ -1203,6 +1225,25 @@ legend.setting-title + * {
   font-variant-numeric: tabular-nums;
 }
 
+.time-rows {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.time-rows li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.time-rows li span:last-child {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
 .extra-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1502,6 +1543,11 @@ legend.setting-title + * {
 
 .history-pick {
   margin-top: 20px;
+}
+
+/* Five views don't fit one row on a phone, so the control wraps. */
+.history-pick .seg {
+  flex-wrap: wrap;
 }
 
 .history-pick .seg-option span {
@@ -2159,6 +2205,42 @@ legend.setting-title + * {
 .muscle-row.is-empty .muscle-name,
 .muscle-row.is-empty .muscle-count strong {
   color: var(--muted);
+}
+
+/* History → Time: a typical day of each kind, and what each exercise takes. */
+.time-list {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.time-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 10px 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.time-name {
+  font-weight: 600;
+}
+
+.time-table td {
+  white-space: nowrap;
+}
+
+.time-num {
+  font: 700 24px/1 var(--display);
+  font-variant-numeric: tabular-nums;
+}
+
+.time-meta {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The track runs past 20 sets; the shaded band marks the 10–20 target. */

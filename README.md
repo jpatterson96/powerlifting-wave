@@ -118,11 +118,25 @@ adds one to that day only.
   the last full week.
 - An exercise loaded with plates (barbell, 45 lb / 20 kg; EZ bar, 25 lb / 10 kg; or a plate-loaded
   machine, plates only) shows the plates per side for its next set.
+- An exercise **counted in plates a side** (a leg press, hack squat or the like) is logged as the number
+  of 45 lb / 20 kg plates on each side instead of a weight. Its weight jump is in plates, and volume
+  counts every plate on both sides.
 - Each exercise names the muscle it counts toward, for the weekly set count in History.
 
 Once a day's lift and accessories are all done or skipped, a summary closes the day: the lift's sets
-(and the estimated max from a test set), accessories done and skipped, total volume, and any new bests
-(an accessory beating every earlier session of the same variant).
+(and the estimated max from a test set), accessories done and skipped, total volume, any new bests
+(an accessory beating every earlier session of the same variant), and, for a timed day, how long it
+took and where the time went.
+
+## Timing a workout
+
+**Start workout** under the day's name starts the clock, and **End workout** at the bottom stops it
+(it also skips any accessory left undone, like Skip the rest). Every set is stamped when it's logged,
+so the day's summary shows how long the day took and where the time went: the lift (with its warm-up)
+and each accessory or superset, with the rest and setting up before a set counted toward the exercise
+it was for. A day left running ends at its last set once you log on a later day, and **Reopen** on the
+same day clears an End tapped too soon. **History → Time** averages this over your days, for planning
+shorter ones.
 
 Apple Health isn't reachable from a web app, so body weight is logged in the app (History → Body).
 
@@ -153,7 +167,9 @@ week that's a common target for growth. Main lift sets count toward chest (bench
 back (deadlift).
 
 **Accessories**: each exercise's heaviest set, estimated max, best session, a chart of its best set
-by session, and recent sessions. **Body**: log today's weight and see it charted.
+by session, and recent sessions. **Time**: how long a typical day of each kind takes, recent days, and
+what each exercise takes on a day you do it, slowest first. **Body**: log today's weight and see it
+charted.
 
 ## Missed days
 

@@ -17,6 +17,12 @@ export const LOADS = {
   ez: { name: 'EZ bar', bar: { lb: 25, kg: 10 } },
   machine: { name: 'plate-loaded machine', bar: { lb: 0, kg: 0 } },
 };
+// An exercise counted in plates (`counted`) is logged as the number of plates on each side, not a weight.
+// It's a field of its own so older versions of the app pass it through untouched.
+export const PLATE = { lb: 45, kg: 20 };
+export const isCounted = (exercise) => exercise?.counted === true;
+// The weight a logged number stands for, for volume: plates a side are counted as full plates, both sides.
+export const loadOf = (exercise, weight, unit) => (isCounted(exercise) ? weight * 2 * PLATE[unit] : weight);
 
 // Weeks 7 and 8 (the taper, then the re-max or deload) cut accessories to half the sets at the same
 // weights and reps, so the main lifts are fresh. They're never "last time" for progressing afterwards.
@@ -214,6 +220,61 @@ export function muscleSets(state, sessions) {
   return count;
 }
 
+// ---------- Workout timing ----------
+
+const byTime = (a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
+
+// The moments a training day's sets were logged, in order: the main lift's (`part` 'lift') and each
+// accessory's (`part` its id). Anything logged after the workout was ended is left out.
+function setTimes(session) {
+  const events = [];
+  (session.times ?? []).forEach((t, i) => { if (t && session.reps[i] !== null) events.push({ at: t, part: 'lift' }); });
+  for (const x of session.extras ?? []) {
+    if (x.skipped) continue;
+    for (const s of x.sets) if (s?.at) events.push({ at: s.at, part: x.exercise });
+  }
+  return events.filter((e) => !session.ended || e.at <= session.ended).sort(byTime);
+}
+
+// How long a training day took and where the time went, in milliseconds. A set's time runs from
+// whatever came before it (the start, or the last set logged, of any exercise) to when it was logged,
+// so rest and setting up count toward the exercise that followed them, and the lift's first set
+// includes the warm-up. Without a start, the first set has nothing before it and isn't counted.
+// `parts` are in the order first done, each with its sets counted. Null when nothing was timed.
+export function workoutTime(session) {
+  const events = setTimes(session);
+  if (!session.started && !events.length) return null;
+  const start = session.started ?? events[0].at;
+  const last = events.length ? events[events.length - 1].at : start;
+  const end = session.ended ?? (last > start ? last : start);
+  const parts = new Map();
+  let prev = session.started ?? null;
+  for (const e of events) {
+    if (prev !== null) {
+      const part = parts.get(e.part) ?? { part: e.part, ms: 0, sets: 0, first: e.at };
+      part.ms += Math.max(0, Date.parse(e.at) - Date.parse(prev));
+      part.sets += 1;
+      parts.set(e.part, part);
+    }
+    prev = e.at;
+  }
+  return { start, end, ended: Boolean(session.ended), total: Math.max(0, Date.parse(end) - Date.parse(start)), parts: [...parts.values()] };
+}
+
+// Every timed training day across the blocks, oldest first, with its day and lift.
+export function timedSessions(state) {
+  const out = [];
+  for (const b of state.blocks) {
+    for (const week of b.log) {
+      for (const s of week) {
+        const time = workoutTime(s);
+        if (time) out.push({ session: s, time });
+      }
+    }
+  }
+  return out;
+}
+
 // Body weight entries stay one per day, oldest first.
 export function logBodyweight(state, date, weight) {
   state.bodyweight = [...state.bodyweight.filter((e) => e.date !== date), { date, weight }]
@@ -223,13 +284,16 @@ export function logBodyweight(state, date, weight) {
 // ---------- Checks on saved data ----------
 
 const isDate = (d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d);
+// A moment as the app writes it: an ISO time in UTC, so the order holds whatever time zone it's read in.
+const isTime = (t) => typeof t === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(t) && !Number.isNaN(Date.parse(t));
 const text = (s, max) => typeof s === 'string' && s.trim().length > 0 && s.length <= max;
 const int = (n, lo, hi) => Number.isInteger(n) && n >= lo && n <= hi;
 
-// A muscle or plate setting that isn't one of the choices is dropped, keeping the exercise.
+// A muscle, plate or counted setting that isn't one of the choices is dropped, keeping the exercise.
 function cleanChoices(e) {
   if (e && e.muscle !== undefined && e.muscle !== null && !MUSCLES.includes(e.muscle)) delete e.muscle;
   if (e && e.plates !== undefined && e.plates !== null && !(typeof e.plates === 'string' && Object.hasOwn(LOADS, e.plates))) delete e.plates;
+  if (e && e.counted !== undefined && typeof e.counted !== 'boolean') delete e.counted;
   return e;
 }
 
@@ -244,21 +308,32 @@ function validExercise(e) {
 
 const validSet = (s) => s === null || (Boolean(s) && typeof s.weight === 'number' && s.weight >= 0 && s.weight < 5000 && int(s.reps, 0, 100));
 
+// A set keeps the moment it was logged only when that reads as a time.
+const cleanSet = (s) => (s && s.at !== undefined && !isTime(s.at) ? { weight: s.weight, reps: s.reps } : s);
+
 const validEntry = (x) => Boolean(x) && typeof x.exercise === 'string' && (x.variant === null || text(x.variant, 40)) &&
   typeof x.skipped === 'boolean' && Array.isArray(x.sets) && x.sets.length <= 20 && x.sets.every(validSet);
+
+const cleanEntries = (list) => list.filter(validEntry).map((x) => ({ ...x, sets: x.sets.map(cleanSet) }));
+
+// A day's timing: when it started and ended, and when each main-lift set was logged (one slot per set).
+function cleanTiming(s) {
+  for (const k of ['started', 'ended']) if (s[k] !== undefined && !isTime(s[k])) delete s[k];
+  if (s.times !== undefined && !(Array.isArray(s.times) && s.times.length === s.reps.length && s.times.every((t) => t === null || isTime(t)))) delete s.times;
+}
 
 const LIFT_IDS = LIFTS.map((l) => l.id);
 const validMax = (n) => typeof n === 'number' && n > 0 && n < 5000;
 
-// Drops anything malformed in the optional data (accessories, body weight, earlier maxes and the days maxes
-// were set) instead of rejecting the whole log, and fills in the fields older logs don't have.
+// Drops anything malformed in the optional data (accessories, body weight, earlier maxes, the days maxes
+// were set, and workout times) instead of rejecting the whole log, and fills in the fields older logs don't have.
 export function cleanExtras(state) {
   state.exercises = Array.isArray(state.exercises) ? state.exercises.map(cleanChoices).filter(validExercise) : [];
   state.bodyweight = Array.isArray(state.bodyweight)
     ? state.bodyweight.filter((e) => e && isDate(e.date) && typeof e.weight === 'number' && e.weight > 0) : [];
   if (state.imported !== undefined) {
     state.imported = Array.isArray(state.imported)
-      ? state.imported.filter((w) => w && isDate(w.date) && Array.isArray(w.extras)).map((w) => ({ ...w, extras: w.extras.filter(validEntry) })) : [];
+      ? state.imported.filter((w) => w && isDate(w.date) && Array.isArray(w.extras)).map((w) => ({ ...w, extras: cleanEntries(w.extras) })) : [];
   }
   if (state.pastMaxes !== undefined) {
     state.pastMaxes = Array.isArray(state.pastMaxes)
@@ -273,8 +348,9 @@ export function cleanExtras(state) {
     }
     for (const week of b.log) {
       for (const s of week) {
-        if (s.extras !== undefined) s.extras = Array.isArray(s.extras) ? s.extras.filter(validEntry) : [];
+        if (s.extras !== undefined) s.extras = Array.isArray(s.extras) ? cleanEntries(s.extras) : [];
         if (s.date !== undefined && !isDate(s.date)) delete s.date;
+        cleanTiming(s);
       }
     }
   }

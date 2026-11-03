@@ -4,6 +4,7 @@ import { newBlock, emptyState, convertState, upgrade, isValidState, estimateMax 
 import {
   newExercise, dayExtras, dayGroups, setLink, supersetOrder, ensureEntry, entryOf, exerciseHistory, lastTime,
   defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras, finishExtras, plannedSets, isNewBest, muscleSets,
+  isCounted, loadOf, workoutTime, timedSessions,
 } from '../extras.js';
 
 const MAX = { squat: 385, bench: 315, deadlift: 455 };
@@ -195,4 +196,70 @@ test('bad accessory data is dropped without losing the log', () => {
   const filled = cleanExtras(upgrade(old));
   assert.deepEqual(filled.exercises, []);
   assert.deepEqual(filled.bodyweight, []);
+});
+
+test('an exercise counted in plates a side logs plates, makes weight for volume, and keeps its count across units', () => {
+  const { state, press, b } = setup();
+  press.counted = true;
+  press.step = 1;
+  assert.equal(isCounted(press), true);
+  assert.equal(loadOf(press, 6, 'lb'), 540);
+  assert.equal(loadOf(press, 1, 'kg'), 40);
+  assert.equal(loadOf({ plates: 'machine' }, 6, 'lb'), 6);
+  ensureEntry(b.log[0][0], press, 'Dumbbell').sets = [{ weight: 6, reps: 10 }, null, null];
+  const kg = convertState(state, 'kg');
+  assert.equal(kg.blocks[0].log[0][0].extras[0].sets[0].weight, 6);
+  assert.equal(kg.exercises[0].step, 1);
+  assert.ok(Math.abs(kg.exercises[1].step - 2.268) < 0.01); // the others still convert
+  assert.deepEqual(suggestion(press, { sets: Array(3).fill({ weight: 6, reps: 12 }) }).weights, [7, 7, 7]);
+  const saved = JSON.parse(JSON.stringify(state));
+  saved.exercises[1].counted = 'yes';
+  const clean = cleanExtras(saved);
+  assert.equal(clean.exercises[0].counted, true);
+  assert.equal('counted' in clean.exercises[1], false);
+});
+
+test('a timed day runs from start to end, each set counted toward the exercise it ended', () => {
+  const { state, press, row, b } = setup();
+  const mon = b.log[0][0];
+  const t = (min) => new Date(Date.UTC(2026, 10, 2, 17, min)).toISOString();
+  mon.started = t(0);
+  mon.reps = [6, 6, 7];
+  mon.times = [t(15), t(18), t(21)];
+  ensureEntry(mon, press, 'Dumbbell').sets = [{ weight: 50, reps: 10, at: t(25) }, { weight: 50, reps: 10, at: t(28) }, { weight: 50, reps: 10 }];
+  ensureEntry(mon, row, null).sets = [{ weight: 100, reps: 8, at: t(31) }, null, null];
+  mon.ended = t(35);
+  const time = workoutTime(mon);
+  assert.equal(time.total, 35 * 60000);
+  assert.equal(time.ended, true);
+  assert.deepEqual(time.parts.map((p) => [p.part, p.ms / 60000, p.sets]), [['lift', 21, 3], [press.id, 7, 2], [row.id, 3, 1]]);
+  // Not ended, it runs to the last set; not started, the first set has nothing before it and isn't counted.
+  delete mon.ended;
+  assert.equal(workoutTime(mon).total, 31 * 60000);
+  assert.equal(workoutTime(mon).end, t(31));
+  delete mon.started;
+  assert.equal(workoutTime(mon).total, 16 * 60000);
+  assert.deepEqual(workoutTime(mon).parts.map((p) => [p.part, p.ms / 60000, p.sets]), [['lift', 6, 2], [press.id, 7, 2], [row.id, 3, 1]]);
+  // A set logged after the end isn't part of the workout.
+  mon.started = t(0);
+  mon.ended = t(30);
+  assert.deepEqual(workoutTime(mon).parts.map((p) => p.part), ['lift', press.id]);
+  assert.equal(workoutTime(b.log[0][1]), null);
+  assert.equal(timedSessions(state).length, 1);
+});
+
+test('workout times that do not read as times are dropped, keeping the sets', () => {
+  const { state, press, b } = setup();
+  const mon = b.log[0][0];
+  mon.started = 'noon';
+  mon.ended = '2026-11-02T18:30:00.000Z';
+  mon.reps = [6, null, null];
+  mon.times = ['2026-11-02T17:30:00.000Z', null]; // one slot short
+  ensureEntry(mon, press, 'Dumbbell').sets = [{ weight: 50, reps: 12, at: 'later' }, { weight: 50, reps: 12, at: '2026-11-02T17:40:00.000Z' }, null];
+  const s = cleanExtras(upgrade(JSON.parse(JSON.stringify(state)))).blocks[0].log[0][0];
+  assert.equal(s.started, undefined);
+  assert.equal(s.ended, '2026-11-02T18:30:00.000Z');
+  assert.equal(s.times, undefined);
+  assert.deepEqual(s.extras[0].sets[0], { weight: 50, reps: 12 });
+  assert.equal(s.extras[0].sets[1].at, '2026-11-02T17:40:00.000Z');
 });

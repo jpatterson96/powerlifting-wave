@@ -6,9 +6,9 @@ import {
   maxChanges, liftRecord, totalHistory, convertState, upgrade,
 } from './logic.js';
 import {
-  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, isLightWeek, plannedSets, newExercise, dayExtras, dayGroups,
-  setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, lastTime, isNewBest, defaultVariant, suggestion,
-  sessionBest, records, muscleSets, logBodyweight, cleanExtras,
+  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, isCounted, loadOf, isLightWeek, plannedSets, newExercise,
+  dayExtras, dayGroups, setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, lastTime, isNewBest, defaultVariant,
+  suggestion, sessionBest, records, muscleSets, workoutTime, timedSessions, logBodyweight, cleanExtras,
 } from './extras.js';
 import { mergeLogs } from './merge.js';
 import * as sync from './sync.js';
@@ -87,19 +87,35 @@ function requestPersist() {
 const block = () => state.blocks[state.blocks.length - 1];
 // Two decimals covers 288.75-style maxes and hides the long tails left by unit conversion.
 const fmt = (n) => String(Math.round(n * 100) / 100);
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const plural = (n, word) => `${n} ${n === 1 ? word : /[^aeiou]y$/.test(word) ? `${word.slice(0, -1)}ies` : `${word}s`}`;
 // Exercise and variant names are typed by the lifter, so they're escaped wherever they go into markup.
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtLoad = (w) => (w === 0 ? 'BW' : fmt(w));
+// An accessory's load as it's logged: plates a side for one counted in plates, else the weight (BW for 0).
+const loadText = (e, w) => (isCounted(e) ? `${fmt(w)} ${w === 1 ? 'plate' : 'plates'}` : fmtLoad(w));
+const loadUnit = (e) => (isCounted(e) ? 'plates a side' : state.unit);
+// An estimated max in the exercise's own terms: a whole weight, or plates to a tenth.
+const estText = (e, v) => (isCounted(e) ? `${fmt(Math.round(v * 10) / 10)} plates` : fmt(Math.round(v)));
 const exerciseById = (id) => state.exercises.find((e) => e.id === id);
 
 // "50 × 12, 12, 10" when the weight holds, "50 × 12, 55 × 10" when it changes.
-function setsText(sets) {
+function setsText(sets, e = null) {
   const parts = [];
-  sets.forEach((s, i) => parts.push(i && s.weight === sets[i - 1].weight ? String(s.reps) : `${fmtLoad(s.weight)} × ${s.reps}`));
+  sets.forEach((s, i) => parts.push(i && s.weight === sets[i - 1].weight ? String(s.reps) : `${loadText(e, s.weight)} × ${s.reps}`));
   return parts.join(', ');
 }
 const restText = (s) => (s % 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s / 60} min`);
+
+const nowISO = () => new Date().toISOString();
+const clockTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+// "48 min" or "1 h 08 min", to the minute.
+function spanText(ms) {
+  const m = Math.round(ms / 60000);
+  if (m < 1) return 'under a minute';
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+}
 
 function todayISO() {
   const d = new Date();
@@ -400,9 +416,29 @@ function dayPanel(b, session, i, isNext) {
       <h2 class="session-lift">${liftOf(session).name}</h2>
       <span class="session-state">${label}</span>
     </div>
+    ${dayTiming(session, i)}
     ${sessionBody(b, session, i)}
     ${daySummary(b, session, i)}
   </section>`;
+}
+
+// Start workout before the day begins; once started, the running time, and when ended, how long it took.
+function dayTiming(session, i) {
+  if (!session.started) {
+    if (['done', 'skipped'].includes(sessionStatus(session))) return '';
+    return `<button class="btn-quiet day-start" data-action="workout-start" data-index="${i}" data-key="start-${i}">Start workout</button>`;
+  }
+  if (!session.ended) {
+    return `<p class="day-time">Started ${clockTime(session.started)}, <span class="day-elapsed" data-start="${session.started}">${spanText(Date.now() - Date.parse(session.started))}</span> so far.</p>`;
+  }
+  const reopen = session.date === todayISO()
+    ? ` <button class="btn-quiet day-reopen" data-action="workout-reopen" data-index="${i}" data-key="reopen-${i}">Reopen</button>` : '';
+  return `<p class="day-time">${clockTime(session.started)} to ${clockTime(session.ended)}, ${spanText(workoutTime(session).total)}.${reopen}</p>`;
+}
+
+// Keeps the running time on a started day current without redrawing the page.
+function tickElapsed() {
+  for (const el of view.querySelectorAll('.day-elapsed')) el.textContent = spanText(Date.now() - Date.parse(el.dataset.start));
 }
 
 const skipButton = (session, i) => (sessionStatus(session) === 'done' ? ''
@@ -476,13 +512,18 @@ function extraTarget(exercise, entry, plan, set) {
 function extrasSection(session, i) {
   const groups = dayGroups(state, session);
   const open = openGroup(session, groups);
+  // A started day ends with End workout, which also skips whatever is left; otherwise Skip the rest does just that.
+  const end = session.started && !session.ended
+    ? `<button class="btn-quiet" data-action="workout-end" data-index="${i}" data-key="workout-end-${i}">End workout</button>`
+    : groups.flat().some((e) => !isFinished(entryOf(session, e.id)))
+      ? `<button class="btn-quiet" data-action="extra-finish" data-index="${i}" data-key="extra-finish-${i}">Skip the rest</button>` : '';
   return `<section class="extras" aria-label="Accessories">
     <h3 class="extras-title">Accessories</h3>
     ${groups.length ? `<ol class="extra-list">${groups.map((g) => groupView(session, i, g, g[0].id === open)).join('')}</ol>`
       : `<p class="hint">Nothing on ${session.day}s yet. Add the exercises you do after your ${liftOf(session).name.toLowerCase()}.</p>`}
     <div class="extras-end">
       <button class="btn-quiet" data-action="extra-add" data-index="${i}" data-key="extra-add-${i}">Add an exercise</button>
-      ${groups.flat().some((e) => !isFinished(entryOf(session, e.id))) ? `<button class="btn-quiet" data-action="extra-finish" data-index="${i}" data-key="extra-finish-${i}">Skip the rest</button>` : ''}
+      ${end}
     </div>
   </section>`;
 }
@@ -506,8 +547,8 @@ function rowLine(session, i, e) {
   const done = entry?.sets.filter(Boolean) ?? [];
   const count = setCount(e, entry);
   const summary = entry?.skipped ? 'Skipped today'
-    : done.length ? `${done.length === count ? plural(count, 'set') : `${done.length} of ${count} sets`}: ${setsText(done)}`
-      : last ? `${range}. Last ${setsText(last.sets)}` : `${range}. New`;
+    : done.length ? `${done.length === count ? plural(count, 'set') : `${done.length} of ${count} sets`}: ${setsText(done, e)}`
+      : last ? `${range}. Last ${setsText(last.sets, e)}` : `${range}. New`;
   const dots = entry?.skipped ? '' : Array.from({ length: count }, (_, s) => `<i class="dot${entry?.sets[s] ? ' is-on' : ''}"></i>`).join('');
   return `<span class="row-line${entry?.skipped ? ' is-skipped' : ''}">
     <span class="row-name">${esc(e.name)}${variant ? ` <span class="row-variant">${esc(variant)}</span>` : ''}</span>
@@ -549,9 +590,11 @@ function groupView(session, i, group, open) {
 
 const lightWeekName = () => (ui.week === FINISH_WEEK ? (block().finish === 'remax' ? 'Re-max week' : 'Deload week') : 'Taper week');
 
-// Plates per side for the next set of an accessory loaded on a bar or a plate-loaded machine.
+// Plates per side for the next set of an accessory loaded on a bar or a plate-loaded machine; for one
+// counted in plates, the weight those plates make.
 function plateNote(e, weight) {
   if (weight === null || !(weight > 0)) return '';
+  if (isCounted(e)) return `${loadText(e, weight)} a side is ${fmt(loadOf(e, weight, state.unit))} ${state.unit} in all, counting each plate as ${PLATE[state.unit]}.`;
   const load = LOADS[e.plates];
   const bar = load.bar[state.unit];
   if (weight < bar) return `${fmt(weight)} is lighter than the empty ${load.name}.`;
@@ -580,10 +623,11 @@ function daySummary(b, session, i) {
     lifted = `${setsText(main)}${test ? `. Est. max ${fmt(Math.round(estimateMax(test.weight, test.reps)))}` : ''}`;
   }
   const skipped = extras.length - done.length;
-  const volume = [...main, ...done.flatMap((x) => x.sets)].reduce((sum, x) => sum + x.weight * x.reps, 0);
+  const volume = [...main, ...done.flatMap((x) => x.sets.map((s) => ({ weight: loadOf(x.e, s.weight, state.unit), reps: s.reps })))]
+    .reduce((sum, x) => sum + x.weight * x.reps, 0);
   const bests = done.filter((x) => isNewBest(state, x.e.id, x.entry.variant, here(i), x.sets)).map((x) => {
     const top = sessionBest(x.sets);
-    return `${esc(x.e.name)}${x.entry.variant ? ` (${esc(x.entry.variant)})` : ''}, ${top.kind === 'reps' ? plural(top.value, 'rep') : `est. max ${fmt(Math.round(top.value))}`}`;
+    return `${esc(x.e.name)}${x.entry.variant ? ` (${esc(x.entry.variant)})` : ''}, ${top.kind === 'reps' ? plural(top.value, 'rep') : `est. max ${estText(x.e, top.value)}`}`;
   });
   return `<section class="day-summary" aria-label="Workout summary">
     <h3 class="summary-title">Workout done${session.date ? `, ${shortDate(session.date)}` : ''}</h3>
@@ -592,8 +636,26 @@ function daySummary(b, session, i) {
       ${extras.length ? `<div><dt>Accessories</dt><dd>${done.length} done${skipped ? `, ${skipped} skipped` : ''}</dd></div>` : ''}
       <div><dt>Volume</dt><dd>${Math.round(volume).toLocaleString()} ${state.unit}</dd></div>
       ${bests.length ? `<div><dt>New bests</dt><dd>${bests.join('<br>')}</dd></div>` : ''}
+      ${session.started ? timeSummary(session) : ''}
     </dl>
   </section>`;
+}
+
+// How long the day took and where the time went, in the order things were done, a superset as one.
+function timeSummary(session) {
+  const time = workoutTime(session);
+  const rows = [];
+  const lift = time.parts.find((p) => p.part === 'lift');
+  if (lift) rows.push({ name: `${liftOf(session).name}, with warm-up`, ms: lift.ms, first: lift.first });
+  for (const g of dayGroups(state, session)) {
+    const parts = g.map((e) => time.parts.find((p) => p.part === e.id)).filter(Boolean);
+    if (!parts.length) continue;
+    const names = g.filter((e) => parts.some((p) => p.part === e.id)).map((e) => esc(e.name));
+    rows.push({ name: names.join(' + '), ms: parts.reduce((sum, p) => sum + p.ms, 0), first: parts.map((p) => p.first).sort()[0] });
+  }
+  rows.sort((a, b) => (a.first < b.first ? -1 : 1));
+  return `<div><dt>Time</dt><dd>${spanText(time.total)}, ${clockTime(time.start)} to ${clockTime(time.end)}${time.ended ? '' : ' (your last set)'}</dd></div>
+    ${rows.length ? `<div><dt>Where it went</dt><dd><ul class="time-rows">${rows.map((r) => `<li><span>${r.name}</span><span>${spanText(r.ms)}</span></li>`).join('')}</ul></dd></div>` : ''}`;
 }
 
 // Skip, or undo a skip, without opening the exercise. Gone once a set is logged, as in the open view.
@@ -622,20 +684,21 @@ function extraDetail(session, i, e, named) {
     const target = extraTarget(e, entry, plan, s);
     const shown = done ?? target;
     const cls = done ? (done.reps >= e.low ? 'set is-good' : 'set is-short') : 'set';
-    const label = done ? `Set ${s + 1}, ${done.reps} reps at ${fmtLoad(done.weight)}` : `Set ${s + 1}, ${shown.reps} reps${shown.weight === null ? '' : ` at ${fmtLoad(shown.weight)}`}, not logged`;
+    const label = done ? `Set ${s + 1}, ${done.reps} reps at ${loadText(e, done.weight)}` : `Set ${s + 1}, ${shown.reps} reps${shown.weight === null ? '' : ` at ${loadText(e, shown.weight)}`}, not logged`;
     return `<span class="extra-set">
       <button class="${cls}" data-action="extra-set" ${ids} data-set="${s}" data-key="extra-${i}-${e.id}-${s}" aria-label="${esc(e.name)}. ${label}">${shown.reps}</button>
-      <span class="extra-weight">${shown.weight === null ? '–' : fmtLoad(shown.weight)}</span>
+      <span class="extra-weight">${shown.weight === null ? '–' : loadText(e, shown.weight)}</span>
     </span>`;
   }).join('');
   const planned = plannedSets(e, ui.week);
   const range = `${planned} × ${e.low}–${e.high}`;
   const fewer = planned < e.sets ? ` instead of ${e.sets}` : '';
+  const first = isCounted(e) ? `count the plates on each side you can lift ${e.low}–${e.high} times` : `pick a weight you can lift ${e.low}–${e.high} times`;
   const note = isLightWeek(ui.week)
-    ? `${lightWeekName()}: ${plural(planned, 'set')}${fewer}${last ? `, repeating last time's ${setsText(last.sets.slice(0, planned))}` : ` of ${e.low}–${e.high}`}, so your main lifts stay fresh.`
-    : !last ? `${range}. First time: pick a weight you can lift ${e.low}–${e.high} times.`
-      : plan.up ? `${range}. Last time ${setsText(last.sets)}: every set at the top, so go up to ${fmtLoad(plan.weights[0])}.`
-        : `${range}. Last time ${setsText(last.sets)}: same weight, one more rep a set.`;
+    ? `${lightWeekName()}: ${plural(planned, 'set')}${fewer}${last ? `, repeating last time's ${setsText(last.sets.slice(0, planned), e)}` : ` of ${e.low}–${e.high}`}, so your main lifts stay fresh.`
+    : !last ? `${range}. First time: ${first}.`
+      : plan.up ? `${range}. Last time ${setsText(last.sets, e)}: every set at the top, so go up to ${loadText(e, plan.weights[0])}.`
+        : `${range}. Last time ${setsText(last.sets, e)}: same ${isCounted(e) ? 'plates' : 'weight'}, one more rep a set.`;
   const next = Array.from({ length: count }, (_, k) => k).find((k) => !entry?.sets[k]);
   const plates = e.plates && next !== undefined ? plateNote(e, extraTarget(e, entry, plan, next).weight) : '';
   const chip = e.variants.length > 1
@@ -860,11 +923,12 @@ function chartWidth() {
 }
 
 const HISTORY_VIEWS = [
-  { value: 'lifts', label: 'Lifts' }, { value: 'extras', label: 'Accessories' }, { value: 'muscles', label: 'Muscles' }, { value: 'body', label: 'Body' },
+  { value: 'lifts', label: 'Lifts' }, { value: 'extras', label: 'Accessories' }, { value: 'muscles', label: 'Muscles' }, { value: 'time', label: 'Time' },
+  { value: 'body', label: 'Body' },
 ];
 
 function historyView() {
-  const section = { extras: extrasHistory, muscles: musclesHistory, body: bodyHistory }[ui.history]?.() ?? liftsHistory();
+  const section = { extras: extrasHistory, muscles: musclesHistory, time: timeHistory, body: bodyHistory }[ui.history]?.() ?? liftsHistory();
   return `<header class="top"><h1 class="display">History</h1></header>
     <fieldset class="history-pick" aria-label="Show">${segmented('historyView', HISTORY_VIEWS, ui.history)}</fieldset>
     ${section}`;
@@ -915,6 +979,72 @@ function chartFigure(kind, label, svg) {
   </figure>`;
 }
 
+const minutes = (ms) => `${Math.round(ms / 6000) / 10} min`;
+
+// How long training days take and where the time goes, from the days timed with Start and End workout.
+// A day still running isn't a day's length yet, so only ended days make the averages.
+function timeHistory() {
+  const all = timedSessions(state);
+  const timed = all.filter(({ time }) => time.ended);
+  if (!timed.length) {
+    return `<p class="chart-empty">Nothing timed yet. Tap Start workout on a training day, log your sets as you go, and End workout when you're done. How long each day took, and where the time went, shows up here.</p>`;
+  }
+  // A typical day of each kind, averaged over the days timed.
+  const days = WEEKDAYS.map((day) => {
+    const of = timed.filter(({ session }) => session.day === day);
+    if (!of.length) return '';
+    const avg = of.reduce((sum, { time }) => sum + time.total, 0) / of.length;
+    return `<li class="time-row">
+      <span class="time-name">${day}, ${liftOf(of[0].session).name.toLowerCase()}</span>
+      <span class="time-num">${spanText(avg)}</span>
+      <span class="time-meta">${of.length === 1 ? 'One day timed' : `Average of ${of.length} days`}</span>
+    </li>`;
+  }).join('');
+  const recent = timed.slice(-12).reverse().map(({ session, time }) => {
+    const lift = time.parts.find((p) => p.part === 'lift');
+    const extras = time.parts.filter((p) => p.part !== 'lift').reduce((sum, p) => sum + p.ms, 0);
+    return `<tr>
+      <th scope="row"><span class="h-date">${session.date ? shortDate(session.date) : '–'}, ${session.day.slice(0, 3)} ${liftOf(session).short.toLowerCase()}</span></th>
+      <td>${spanText(time.total)}</td>
+      <td>${lift ? spanText(lift.ms) : '–'}</td>
+      <td>${extras ? spanText(extras) : '–'}</td>
+    </tr>`;
+  }).join('');
+  // Each exercise over every timed set: the lifts by name, accessories by id, a deleted one left out.
+  const totals = new Map();
+  for (const { session, time } of all) {
+    for (const p of time.parts) {
+      const key = p.part === 'lift' ? `lift:${session.lift}` : p.part;
+      const t = totals.get(key) ?? { ms: 0, sets: 0, days: 0 };
+      Object.assign(t, { ms: t.ms + p.ms, sets: t.sets + p.sets, days: t.days + 1 });
+      totals.set(key, t);
+    }
+  }
+  const rows = [...totals].map(([key, t]) => {
+    const name = key.startsWith('lift:') ? `${LIFTS.find((l) => l.id === key.slice(5)).name}, with warm-up` : exerciseById(key)?.name;
+    return name && { name: esc(name), perDay: t.ms / t.days, perSet: t.ms / t.sets, days: t.days };
+  }).filter(Boolean).sort((a, b) => b.perDay - a.perDay).map((r) => `<li class="time-row">
+      <span class="time-name">${r.name}</span>
+      <span class="time-num">${spanText(r.perDay)}</span>
+      <span class="time-meta">${minutes(r.perSet)} a set, rest included, over ${plural(r.days, 'day')}</span>
+    </li>`).join('');
+  return `<section class="chart-block">
+      <h2 class="chart-title">How long your days take</h2>
+      <p class="hint">From Start workout to End workout. The lift's time includes its warm-up, and the rest and setting up before a set count toward the exercise that followed.</p>
+      <ul class="time-list">${days}</ul>
+      <h3 class="chart-title history-title">Recent days</h3>
+      <table class="history weeks time-table">
+        <thead><tr><th scope="col">Day</th><th scope="col">Length</th><th scope="col">Lift</th><th scope="col">Accessories</th></tr></thead>
+        <tbody>${recent}</tbody>
+      </table>
+    </section>
+    <section class="chart-block">
+      <h2 class="chart-title">Where the time goes</h2>
+      <p class="hint">What each exercise takes on a day you do it, the slowest first. To make a day shorter, shorten the rests here, superset two, or drop one.</p>
+      <ul class="time-list">${rows}</ul>
+    </section>`;
+}
+
 function extrasHistory() {
   if (ui.exercise && exerciseById(ui.exercise)) return exerciseDetail(exerciseById(ui.exercise));
   if (!state.exercises.length) {
@@ -925,7 +1055,7 @@ function extrasHistory() {
     const last = h[h.length - 1];
     const best = records(h).best;
     const meta = last
-      ? `Last ${last.date ? shortDate(last.date) : 'logged'}: ${setsText(last.sets)}${best ? `. Est. max ${fmt(Math.round(best.value))}` : ''}`
+      ? `Last ${last.date ? shortDate(last.date) : 'logged'}: ${setsText(last.sets, e)}${best ? `. Est. max ${estText(e, best.value)}` : ''}`
       : 'Not logged yet';
     return `<li><button class="index-row" data-action="exercise-open" data-exercise="${e.id}">
       <span class="index-name">${esc(e.name)}</span><span class="index-meta">${meta}</span>
@@ -948,23 +1078,23 @@ function exerciseDetail(e) {
   const points = history.map((h, i) => {
     const top = sessionBest(h.sets);
     const date = h.date ? shortDate(h.date) : `Session ${i + 1}`;
-    return { value: Math.round(top.value * 10) / 10, label: date, title: date, note: top.kind === 'reps' ? 'reps, best set' : `est. max, from ${setsText(h.sets)}` };
+    return { value: Math.round(top.value * 10) / 10, label: date, title: date, note: top.kind === 'reps' ? 'reps, best set' : `est. max, from ${setsText(h.sets, e)}` };
   });
   chartData.progress = points;
   const reps = points.every((p, i) => sessionBest(history[i].sets).kind === 'reps');
   const recent = history.slice(-8).reverse().map((h) => `<tr>
       <th scope="row"><span class="h-date">${h.date ? shortDate(h.date) : '–'}</span></th>
-      <td class="sets-cell">${setsText(h.sets)}</td>
+      <td class="sets-cell">${setsText(h.sets, e)}</td>
     </tr>`).join('');
   return `${back}${title}${variants}
     <dl class="stats">
-      <div><dt>Heaviest set</dt><dd>${fmtLoad(heaviest.weight)} × ${heaviest.reps}</dd></div>
-      ${best ? `<div><dt>Estimated max</dt><dd>${fmt(Math.round(best.value))}</dd></div>` : ''}
-      <div><dt>Best session</dt><dd>${Math.round(volume).toLocaleString()}</dd></div>
+      <div><dt>Heaviest set</dt><dd>${loadText(e, heaviest.weight)} × ${heaviest.reps}</dd></div>
+      ${best ? `<div><dt>Estimated max</dt><dd>${estText(e, best.value)}</dd></div>` : ''}
+      <div><dt>Best session</dt><dd>${Math.round(loadOf(e, volume, state.unit)).toLocaleString()}</dd></div>
     </dl>
-    <p class="hint">Best session is weight × reps added up, in ${state.unit}.</p>
+    <p class="hint">Best session is weight × reps added up, in ${state.unit}.${isCounted(e) ? ` Each plate counts as ${PLATE[state.unit]} ${state.unit}, both sides.` : ''}</p>
     <section class="chart-block">
-      <h3 class="chart-title">${reps ? 'Most reps in a set' : 'Estimated max, by session'}</h3>
+      <h3 class="chart-title">${reps ? 'Most reps in a set' : `Estimated max${isCounted(e) ? ' in plates' : ''}, by session`}</h3>
       ${points.length > 1 ? chartFigure('progress', `${esc(e.name)} by session`, progressChart(points, chartWidth()))
         : '<p class="chart-empty">Log it again to see a chart.</p>'}
     </section>
@@ -1165,7 +1295,7 @@ function exercisesSection() {
     return `<li class="exercise-row">
       <button class="index-row" data-action="exercise-edit" data-exercise="${e.id}" data-key="exercise-edit-${e.id}">
         <span class="index-name">${esc(e.name)}</span>
-        <span class="index-meta">${e.sets} × ${e.low}–${e.high}, ${days}${e.muscle ? `. ${e.muscle}` : ''}${variants}</span>
+        <span class="index-meta">${e.sets} × ${e.low}–${e.high}, ${days}${e.muscle ? `. ${e.muscle}` : ''}${isCounted(e) ? '. In plates a side' : ''}${variants}</span>
       </button>
       <button class="icon-btn" data-action="exercise-move" data-exercise="${e.id}" data-by="-1" data-key="exercise-up-${e.id}"
         aria-label="Move ${esc(e.name)} up"${i === 0 ? ' disabled' : ''}>↑</button>
@@ -1259,6 +1389,12 @@ function logSet(session, set, reps) {
     markTrained(session);
   }
   session.reps[set] = reps;
+  // When each set was logged, for the day's timing. A set changed later keeps its time.
+  if (fresh || reps === null) {
+    session.times ??= session.reps.map(() => null);
+    session.times[set] = fresh ? nowISO() : null;
+    if (session.times.every((t) => t === null)) delete session.times;
+  }
   save();
   if (!fresh) return;
   const next = session.reps.findIndex((r) => r === null);
@@ -1317,9 +1453,11 @@ function openExtra(index, id, set) {
   const target = extraTarget(e, entry, plan, set);
   ui.sheet = { index, set, exercise: id };
   document.getElementById('reps-title').textContent = `${e.name}${variant ? `, ${variant}` : ''}, set ${set + 1}`;
-  document.getElementById('reps-note').textContent = `${e.low}–${e.high} reps. Set the weight (0 for body weight), then tap the reps you did.`;
+  document.getElementById('reps-note').textContent = isCounted(e)
+    ? `${e.low}–${e.high} reps. Count the ${PLATE[state.unit]} ${state.unit} plates on one side, then tap the reps you did.`
+    : `${e.low}–${e.high} reps. Set the weight (0 for body weight), then tap the reps you did.`;
   document.getElementById('reps-weight-field').hidden = false;
-  document.getElementById('reps-weight-unit').textContent = state.unit;
+  document.getElementById('reps-weight-unit').textContent = loadUnit(e);
   const weight = current?.weight ?? target.weight ?? entry?.sets.filter(Boolean).pop()?.weight;
   repsWeight.value = weight === undefined || weight === null ? '' : fmt(weight);
   repGrid.classList.remove('is-judging');
@@ -1330,19 +1468,27 @@ function openExtra(index, id, set) {
 }
 
 // Logging on a day marks it trained. Days trained before today are over by then, so whatever accessories
-// they have left are skipped.
+// they have left are skipped, and a workout left running ends at its last set.
 function markTrained(session) {
   const today = todayISO();
   session.date ??= today;
   block().lastTrained = today;
-  for (const s of block().log.flat()) if (s !== session && s.date && s.date < today) finishExtras(state, s);
+  for (const s of block().log.flat()) {
+    if (s === session || !s.date || s.date >= today) continue;
+    finishExtras(state, s);
+    if (s.started && !s.ended) s.ended = workoutTime(s).end;
+  }
 }
 
 function logExtra(index, exercise, set, value) {
   const session = sessionAt(index);
   const variant = entryOf(session, exercise.id)?.variant ?? defaultVariant(state, exercise);
   const entry = entryFor(session, exercise, variant);
-  const fresh = entry.sets[set] === null && value !== null;
+  const was = entry.sets[set];
+  const fresh = was === null && value !== null;
+  // When the set was logged, for the day's timing. A set changed later keeps its time.
+  if (fresh) value.at = nowISO();
+  else if (value && was?.at) value.at = was.at;
   entry.sets[set] = value;
   // Clearing an added set at the end removes it again.
   if (value === null && set >= plannedSets(exercise, ui.week) && set === entry.sets.length - 1) entry.sets.pop();
@@ -1359,7 +1505,7 @@ function logExtra(index, exercise, set, value) {
   const { weight } = extraTarget(ahead, entryOf(session, ahead.id), plan, next.set);
   // Within a superset round there's only the move to the other exercise; the full rest comes after the round.
   const seconds = ahead !== exercise && next.set === set ? 15 : Math.max(...group.map((e) => e.rest));
-  rest.start(seconds, `Next: ${ahead.name}, set ${next.set + 1} of ${counts[next.which]}${weight === null ? '' : `, ${fmtLoad(weight)} ${state.unit}`}`);
+  rest.start(seconds, `Next: ${ahead.name}, set ${next.set + 1} of ${counts[next.which]}${weight === null ? '' : `, ${loadText(ahead, weight)}${isCounted(ahead) ? ' a side' : ` ${state.unit}`}`}`);
 }
 
 function openPick(index) {
@@ -1399,7 +1545,7 @@ function openEditor(id, index = null) {
   ui.editing = { id, index };
   const f = exerciseForm.elements;
   document.getElementById('exercise-title').textContent = e ? 'Edit exercise' : 'New exercise';
-  document.getElementById('exercise-unit').textContent = state.unit;
+  document.getElementById('exercise-unit').textContent = isCounted(e) ? 'plates' : state.unit;
   document.getElementById('exercise-delete').hidden = !e;
   f.name.value = e?.name ?? '';
   f.variants.value = e?.variants.join(', ') ?? '';
@@ -1414,9 +1560,12 @@ function openEditor(id, index = null) {
   const partner = e && (e.link ?? state.exercises.find((x) => x.link === e.id)?.id);
   document.getElementById('exercise-muscle').innerHTML = `<option value="">Not set</option>${MUSCLES
     .map((m) => `<option value="${m}"${m === e?.muscle ? ' selected' : ''}>${m}</option>`).join('')}`;
-  const loads = [['', 'None: dumbbells, cables or a stack'], ...Object.entries(LOADS).map(([k, l]) => [k, l.bar[state.unit] ? `${l.name[0].toUpperCase()}${l.name.slice(1)}, ${fmt(l.bar[state.unit])} ${state.unit}` : 'Plate-loaded machine'])];
+  const loadLabel = (l) => (l.bar[state.unit] ? `${l.name[0].toUpperCase()}${l.name.slice(1)}, ${fmt(l.bar[state.unit])} ${state.unit}` : 'Plate-loaded machine, by weight');
+  const loads = [['', 'None: dumbbells, cables or a stack'], ...Object.entries(LOADS).map(([k, l]) => [k, loadLabel(l)]),
+    ['count', `Counted in plates a side, ${PLATE[state.unit]} ${state.unit} each`]];
+  const load = isCounted(e) ? 'count' : e?.plates ?? '';
   document.getElementById('exercise-plates').innerHTML = loads
-    .map(([k, label]) => `<option value="${k}"${k === (e?.plates ?? '') ? ' selected' : ''}>${label}</option>`).join('');
+    .map(([k, label]) => `<option value="${k}"${k === load ? ' selected' : ''}>${label}</option>`).join('');
   document.getElementById('exercise-link').innerHTML = `<option value="">None</option>${state.exercises
     .filter((x) => x !== e)
     .map((x) => `<option value="${x.id}"${x.id === partner ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}`;
@@ -1595,8 +1744,10 @@ const FORMS = {
     if (!(step > 0) || step > 100) return toast(`Set a weight jump above 0, like ${EXTRA_STEP[state.unit]} ${state.unit}.`);
     if (!Number.isInteger(rest) || rest < 15 || rest > 900) return toast('Rest must be 15 to 900 seconds.');
     const muscle = MUSCLES.includes(f.muscle.value) ? f.muscle.value : null;
-    const plates = Object.hasOwn(LOADS, f.plates.value) ? f.plates.value : null;
-    const fields = { name, variants, sets, low, high, step, rest, days, muscle, plates };
+    // Counted in plates a side is its own switch; the plate math modes are mutually exclusive with it.
+    const counted = f.plates.value === 'count';
+    const plates = !counted && Object.hasOwn(LOADS, f.plates.value) ? f.plates.value : null;
+    const fields = { name, variants, sets, low, high, step, rest, days, muscle, plates, counted };
     const { id, index } = ui.editing;
     let e = id ? exerciseById(id) : null;
     if (e) {
@@ -1780,7 +1931,7 @@ const ACTIONS = {
     const open = entry.sets.lastIndexOf(null);
     if (open === -1) {
       const last = entry.sets[entry.sets.length - 1];
-      if (!confirm(`Remove set ${entry.sets.length}, ${fmtLoad(last.weight)} × ${last.reps}?`)) return;
+      if (!confirm(`Remove set ${entry.sets.length}, ${loadText(e, last.weight)} × ${last.reps}?`)) return;
     }
     entry.sets.splice(open === -1 ? entry.sets.length - 1 : open, 1);
     save();
@@ -1792,6 +1943,30 @@ const ACTIONS = {
     save();
     rest.stop();
     render();
+  },
+  // Starting dates the day (and closes earlier ones) the same as logging a set does.
+  'workout-start'(el) {
+    const session = sessionAt(Number(el.dataset.index));
+    session.started = nowISO();
+    markTrained(session);
+    save();
+    render();
+  },
+  'workout-end'(el) {
+    const session = sessionAt(Number(el.dataset.index));
+    session.ended = nowISO();
+    const left = finishExtras(state, session);
+    ui.extraOpen = null;
+    save();
+    rest.stop();
+    render();
+    toast(`Workout ended, ${spanText(workoutTime(session).total)}.${left ? ` ${plural(left, 'accessory')} not finished ${left === 1 ? 'was' : 'were'} skipped.` : ''}`);
+  },
+  'workout-reopen'(el) {
+    delete sessionAt(Number(el.dataset.index)).ended;
+    save();
+    render();
+    toast('Reopened. Anything skipped stays skipped until you undo it.');
   },
   'extra-skip'(el) {
     const session = sessionAt(Number(el.dataset.index));
@@ -2058,6 +2233,18 @@ weightInput.addEventListener('keydown', (e) => {
   // Without this, the same Enter also presses the weight button that gets focus back after the sheet closes.
   e.preventDefault();
   ACTIONS['weight-save']();
+});
+
+// Switching an exercise to or from plates a side changes what its weight jump is counted in.
+exerciseForm.elements.plates.addEventListener('change', (e) => {
+  const counted = e.target.value === 'count';
+  document.getElementById('exercise-unit').textContent = counted ? 'plates' : state.unit;
+  exerciseForm.elements.step.value = fmt(counted ? 1 : EXTRA_STEP[state.unit]);
+});
+
+setInterval(tickElapsed, 30000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') tickElapsed();
 });
 
 restoreInput.addEventListener('change', () => {

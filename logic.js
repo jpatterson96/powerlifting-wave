@@ -460,7 +460,9 @@ export function convertState(state, to) {
   const factor = to === 'kg' ? 1 / LB_PER_KG : LB_PER_KG;
   // Full precision so switching back and forth returns the original numbers; the screen rounds for display.
   const conv = (n) => (n === null ? null : n * factor);
-  const extras = (list) => list.map((x) => ({ ...x, sets: x.sets.map((s) => s && { ...s, weight: conv(s.weight) }) }));
+  // An accessory counted in plates a side is a count, not a weight, in either unit.
+  const counted = new Set((state.exercises ?? []).filter((e) => e.counted === true).map((e) => e.id));
+  const extras = (list) => list.map((x) => (counted.has(x.exercise) ? x : { ...x, sets: x.sets.map((s) => s && { ...s, weight: conv(s.weight) }) }));
   const blocks = state.blocks.map((b) => ({
     ...b,
     max: Object.fromEntries(Object.entries(b.max).map(([k, v]) => [k, conv(v)])),
@@ -470,7 +472,7 @@ export function convertState(state, to) {
   }));
   return {
     ...state, unit: to, round: ROUNDING[to][0], blocks,
-    ...(state.exercises && { exercises: state.exercises.map((e) => ({ ...e, step: conv(e.step) })) }),
+    ...(state.exercises && { exercises: state.exercises.map((e) => (counted.has(e.id) ? e : { ...e, step: conv(e.step) })) }),
     ...(state.bodyweight && { bodyweight: state.bodyweight.map((e) => ({ ...e, weight: conv(e.weight) })) }),
     ...(state.imported && { imported: state.imported.map((w) => ({ ...w, extras: extras(w.extras) })) }),
     ...(state.pastMaxes && { pastMaxes: state.pastMaxes.map((p) => ({ ...p, value: conv(p.value) })) }),

@@ -6,8 +6,9 @@ import {
   maxChanges, convertState, upgrade,
 } from './logic.js';
 import {
-  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, newExercise, dayExtras, dayGroups, setLink, supersetOrder, entryOf, ensureEntry, finishExtras,
-  exerciseHistory, lastTime, defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras,
+  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, isLightWeek, plannedSets, newExercise, dayExtras, dayGroups,
+  setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, lastTime, isNewBest, defaultVariant, suggestion,
+  sessionBest, records, muscleSets, logBodyweight, cleanExtras,
 } from './extras.js';
 import { mergeLogs } from './merge.js';
 import * as sync from './sync.js';
@@ -36,7 +37,7 @@ let state = load();
 // `past` the earlier max being changed, by its place in state.pastMaxes (null for a new one).
 const ui = {
   tab: 'train', reviewing: false, week: null, open: undefined, sheet: null, lift: 'squat',
-  history: 'lifts', exercise: null, variant: null, editing: null, past: null,
+  history: 'lifts', exercise: null, variant: null, editing: null, past: null, muscleWeek: null,
   // The accessory (or superset) opened on the shown day, by its first exercise's id; undefined picks one under way.
   extraOpen: undefined,
 };
@@ -399,6 +400,7 @@ function dayPanel(b, session, i, isNext) {
       <span class="session-state">${label}</span>
     </div>
     ${sessionBody(b, session, i)}
+    ${daySummary(b, session, i)}
   </section>`;
 }
 
@@ -452,17 +454,21 @@ const here = (index) => [state.blocks.length - 1, ui.week, index];
 function extraPlan(session, index, exercise) {
   const entry = entryOf(session, exercise.id);
   const variant = entry?.variant ?? defaultVariant(state, exercise);
-  const last = lastTime(state, exercise.id, variant, here(index));
-  return { entry, variant, last, plan: suggestion(exercise, last) };
+  const last = lastTime(state, exercise.id, variant, here(index), true);
+  return { entry, variant, last, plan: suggestion(exercise, last, ui.week) };
 }
+
+// The day's record for an exercise, made with the week's number of sets the first time it's needed.
+const entryFor = (session, exercise, variant) => ensureEntry(session, exercise, variant, plannedSets(exercise, ui.week));
 
 // The weight and reps a set is prefilled with: the plan from last time, or else today's set before it
 // (the first time through, and for sets added past the plan).
 function extraTarget(exercise, entry, plan, set) {
-  if (set < exercise.sets && plan.weights[set] !== null) return { weight: plan.weights[set], reps: plan.reps[set] };
+  const planned = set < plan.reps.length;
+  if (planned && plan.weights[set] !== null) return { weight: plan.weights[set], reps: plan.reps[set] };
   const prev = entry?.sets.slice(0, set).filter(Boolean).pop();
   if (prev) return { ...prev };
-  return { weight: null, reps: set < exercise.sets ? plan.reps[set] : exercise.low };
+  return { weight: null, reps: planned ? plan.reps[set] : exercise.low };
 }
 
 // Accessories as a compact list: one line each, with the exercise (or superset) being done opened up.
@@ -489,13 +495,13 @@ function openGroup(session, groups) {
   return groups.find((g) => g.some((e) => isUnderway(entryOf(session, e.id))))?.[0].id ?? null;
 }
 
-// Today's sets once anything is recorded, so sets added or removed today stick; else the planned number.
-const setCount = (e, entry) => entry?.sets.length ?? e.sets;
+// Today's sets once anything is recorded, so sets added or removed today stick; else the week's planned number.
+const setCount = (e, entry) => entry?.sets.length ?? plannedSets(e, ui.week);
 
 // One exercise's line in the list: name, a light per set, and either today's sets or last time's.
 function rowLine(session, i, e) {
   const { entry, variant, last } = extraPlan(session, i, e);
-  const range = `${e.sets} × ${e.low}–${e.high}`;
+  const range = `${plannedSets(e, ui.week)} × ${e.low}–${e.high}`;
   const done = entry?.sets.filter(Boolean) ?? [];
   const count = setCount(e, entry);
   const summary = entry?.skipped ? 'Skipped today'
@@ -540,6 +546,55 @@ function groupView(session, i, group, open) {
   </li>`;
 }
 
+const lightWeekName = () => (ui.week === FINISH_WEEK ? (block().finish === 'remax' ? 'Re-max week' : 'Deload week') : 'Taper week');
+
+// Plates per side for the next set of an accessory loaded on a bar or a plate-loaded machine.
+function plateNote(e, weight) {
+  if (weight === null || !(weight > 0)) return '';
+  const load = LOADS[e.plates];
+  const bar = load.bar[state.unit];
+  if (weight < bar) return `${fmt(weight)} is lighter than the empty ${load.name}.`;
+  const plates = platesPerSide(weight, state.unit, bar);
+  const made = tidy(bar + 2 * plates.reduce((sum, p) => sum + p, 0));
+  const on = bar ? `, on the ${fmt(bar)} ${state.unit} ${load.name}` : '';
+  const text = `${fmt(weight)} ${state.unit}: ${plates.length ? `${plates.map(fmt).join(' + ')} each side${on}` : `the empty ${load.name}`}`;
+  return `${text}${made !== weight ? `. Plates make ${fmt(made)}` : ''}.`;
+}
+
+// Once a day's lift and every accessory are done or skipped: what was lifted, and any new bests.
+function daySummary(b, session, i) {
+  if (!['done', 'skipped'].includes(sessionStatus(session))) return '';
+  const extras = dayExtras(state, session).map((e) => ({ e, entry: entryOf(session, e.id) }));
+  if (!extras.every(({ entry }) => isFinished(entry))) return '';
+  const main = session.skipped ? [] : session.reps.map((r, s) => ({ weight: setWeight(b, session, ui.week, s, state), reps: r, s }));
+  const done = extras.filter(({ entry }) => !entry.skipped).map((x) => ({ ...x, sets: x.entry.sets.filter(Boolean) }));
+  if (!main.length && !done.length) return '';
+  const lift = liftOf(session);
+  let lifted = 'Skipped';
+  if (session.kind === 'max') {
+    const good = main.filter((x) => x.reps > 0).map((x) => x.weight);
+    lifted = good.length ? `Best good lift ${fmt(Math.max(...good))}` : 'No good lift';
+  } else if (main.length) {
+    const test = main.find((x) => isTestSet(session, ui.week, x.s));
+    lifted = `${setsText(main)}${test ? `. Est. max ${fmt(Math.round(estimateMax(test.weight, test.reps)))}` : ''}`;
+  }
+  const skipped = extras.length - done.length;
+  const volume = [...main, ...done.flatMap((x) => x.sets)].reduce((sum, x) => sum + x.weight * x.reps, 0);
+  const bests = done.filter((x) => isNewBest(state, x.e.id, x.entry.variant, here(i), x.sets)).map((x) => {
+    const top = sessionBest(x.sets);
+    return `${esc(x.e.name)}${x.entry.variant ? ` (${esc(x.entry.variant)})` : ''}, ${top.kind === 'reps' ? plural(top.value, 'rep') : `est. max ${fmt(Math.round(top.value))}`}`;
+  });
+  return `<section class="day-summary" aria-label="Workout summary">
+    <h3 class="summary-title">Workout done${session.date ? `, ${shortDate(session.date)}` : ''}</h3>
+    <dl class="summary-list">
+      <div><dt>${lift.name}</dt><dd>${lifted}</dd></div>
+      ${extras.length ? `<div><dt>Accessories</dt><dd>${done.length} done${skipped ? `, ${skipped} skipped` : ''}</dd></div>` : ''}
+      <div><dt>Volume</dt><dd>${Math.round(volume).toLocaleString()} ${state.unit}</dd></div>
+      ${bests.length ? `<div><dt>New bests</dt><dd>${bests.join('<br>')}</dd></div>` : ''}
+    </dl>
+  </section>`;
+}
+
 // Skip, or undo a skip, without opening the exercise. Gone once a set is logged, as in the open view.
 function quickSkip(session, i, e) {
   const entry = entryOf(session, e.id);
@@ -572,10 +627,16 @@ function extraDetail(session, i, e, named) {
       <span class="extra-weight">${shown.weight === null ? '–' : fmtLoad(shown.weight)}</span>
     </span>`;
   }).join('');
-  const range = `${e.sets} × ${e.low}–${e.high}`;
-  const note = !last ? `${range}. First time: pick a weight you can lift ${e.low}–${e.high} times.`
-    : plan.up ? `${range}. Last time ${setsText(last.sets)}: every set at the top, so go up to ${fmtLoad(plan.weights[0])}.`
-      : `${range}. Last time ${setsText(last.sets)}: same weight, one more rep a set.`;
+  const planned = plannedSets(e, ui.week);
+  const range = `${planned} × ${e.low}–${e.high}`;
+  const fewer = planned < e.sets ? ` instead of ${e.sets}` : '';
+  const note = isLightWeek(ui.week)
+    ? `${lightWeekName()}: ${plural(planned, 'set')}${fewer}${last ? `, repeating last time's ${setsText(last.sets.slice(0, planned))}` : ` of ${e.low}–${e.high}`}, so your main lifts stay fresh.`
+    : !last ? `${range}. First time: pick a weight you can lift ${e.low}–${e.high} times.`
+      : plan.up ? `${range}. Last time ${setsText(last.sets)}: every set at the top, so go up to ${fmtLoad(plan.weights[0])}.`
+        : `${range}. Last time ${setsText(last.sets)}: same weight, one more rep a set.`;
+  const next = Array.from({ length: count }, (_, k) => k).find((k) => !entry?.sets[k]);
+  const plates = e.plates && next !== undefined ? plateNote(e, extraTarget(e, entry, plan, next).weight) : '';
   const chip = e.variants.length > 1
     ? `<button class="chip" data-action="extra-variant" ${ids} data-key="extra-variant-${i}-${e.id}" aria-label="${esc(e.name)} variant: ${esc(variant)}. Change">${esc(variant)}</button>`
     : e.variants.length ? `<span class="chip is-static">${esc(variant)}</span>` : '';
@@ -583,6 +644,7 @@ function extraDetail(session, i, e, named) {
     ${named || chip ? `<div class="extra-head">${name}${chip}</div>` : ''}
     <p class="extra-note">${note}</p>
     <div class="sets extra-sets" role="group" aria-label="${esc(e.name)} sets">${lights}</div>
+    ${plates ? `<p class="extra-plates">${plates}</p>` : ''}
     <div class="extra-actions">
       ${count < 20 ? `<button class="btn-quiet" data-action="extra-set-add" ${ids}>Add a set</button>` : ''}
       ${count > 1 ? `<button class="btn-quiet" data-action="extra-set-remove" ${ids}>Remove a set</button>` : ''}
@@ -723,13 +785,53 @@ function chartWidth() {
   return Math.floor(view.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
 }
 
-const HISTORY_VIEWS = [{ value: 'lifts', label: 'Lifts' }, { value: 'extras', label: 'Accessories' }, { value: 'body', label: 'Body' }];
+const HISTORY_VIEWS = [
+  { value: 'lifts', label: 'Lifts' }, { value: 'extras', label: 'Accessories' }, { value: 'muscles', label: 'Muscles' }, { value: 'body', label: 'Body' },
+];
 
 function historyView() {
-  const section = ui.history === 'extras' ? extrasHistory() : ui.history === 'body' ? bodyHistory() : liftsHistory();
+  const section = { extras: extrasHistory, muscles: musclesHistory, body: bodyHistory }[ui.history]?.() ?? liftsHistory();
   return `<header class="top"><h1 class="display">History</h1></header>
     <fieldset class="history-pick" aria-label="Show">${segmented('historyView', HISTORY_VIEWS, ui.history)}</fieldset>
     ${section}`;
+}
+
+// Hard sets per muscle in one week of the current block, against the 10–20 a week that's a common target
+// for growth, with the week before for comparison.
+const SET_TARGET = [10, 20];
+
+function musclesHistory() {
+  const b = block();
+  const now = currentWeek(b);
+  const week = Math.min(ui.muscleWeek ?? now, now);
+  const prevBlock = state.blocks[state.blocks.length - 2];
+  const counts = muscleSets(state, b.log[week]);
+  const before = week ? muscleSets(state, b.log[week - 1]) : prevBlock ? muscleSets(state, prevBlock.log[BLOCK_WEEKS - 1]) : null;
+  const assigned = new Set([...Object.values(LIFT_MUSCLE), ...state.exercises.map((e) => e.muscle ?? null)]);
+  const shown = [...MUSCLES, null].filter((m) => counts.has(m) || before?.has(m) || (m !== null && assigned.has(m)));
+  const scale = Math.max(SET_TARGET[1] + 4, ...counts.values());
+  const pct = (n) => `${(n / scale) * 100}%`;
+  const rows = shown.map((m) => {
+    const n = counts.get(m) ?? 0;
+    const was = before && (before.get(m) ?? 0);
+    return `<li class="muscle-row${n ? '' : ' is-empty'}">
+      <span class="muscle-name">${m ?? 'Muscle not set'}</span>
+      <span class="muscle-count"><strong>${n}</strong> ${n === 1 ? 'set' : 'sets'}${before ? `<span class="muscle-was">, ${was} the week before</span>` : ''}</span>
+      <span class="muscle-track" aria-hidden="true">
+        <span class="muscle-band" style="left:${pct(SET_TARGET[0])};width:${pct(SET_TARGET[1] - SET_TARGET[0])}"></span>
+        <span class="muscle-fill" style="width:${pct(n)}"></span>
+      </span>
+    </li>`;
+  }).join('');
+  const unset = state.exercises.filter((e) => !e.muscle).length;
+  return `<div class="week-step">
+      <button class="icon-btn" data-action="muscle-week" data-by="-1" data-key="muscle-prev" aria-label="Week before"${week === 0 ? ' disabled' : ''}>‹</button>
+      <h2 class="week-step-label">Week ${week + 1}${week === now ? ', this week' : ''}</h2>
+      <button class="icon-btn" data-action="muscle-week" data-by="1" data-key="muscle-next" aria-label="Week after"${week >= now ? ' disabled' : ''}>›</button>
+    </div>
+    <p class="hint">Sets logged for each muscle in this training week. The shaded part of each bar is ${SET_TARGET[0]}–${SET_TARGET[1]} sets, a common weekly target for growth.${isLightWeek(week) ? ' Weeks 7 and 8 are lighter on purpose.' : ''}</p>
+    <ul class="muscle-list">${rows}</ul>
+    <p class="hint">Main lift sets count too: bench for chest, squat for quads, deadlift for back.${unset ? ` ${plural(unset, 'accessory')} ${unset === 1 ? 'has' : 'have'} no muscle yet; set it in Settings → Accessories.` : ''}</p>`;
 }
 
 function chartFigure(kind, label, svg) {
@@ -989,7 +1091,7 @@ function exercisesSection() {
     return `<li class="exercise-row">
       <button class="index-row" data-action="exercise-edit" data-exercise="${e.id}" data-key="exercise-edit-${e.id}">
         <span class="index-name">${esc(e.name)}</span>
-        <span class="index-meta">${e.sets} × ${e.low}–${e.high}, ${days}${variants}</span>
+        <span class="index-meta">${e.sets} × ${e.low}–${e.high}, ${days}${e.muscle ? `. ${e.muscle}` : ''}${variants}</span>
       </button>
       <button class="icon-btn" data-action="exercise-move" data-exercise="${e.id}" data-by="-1" data-key="exercise-up-${e.id}"
         aria-label="Move ${esc(e.name)} up"${i === 0 ? ' disabled' : ''}>↑</button>
@@ -1165,11 +1267,11 @@ function markTrained(session) {
 function logExtra(index, exercise, set, value) {
   const session = sessionAt(index);
   const variant = entryOf(session, exercise.id)?.variant ?? defaultVariant(state, exercise);
-  const entry = ensureEntry(session, exercise, variant);
+  const entry = entryFor(session, exercise, variant);
   const fresh = entry.sets[set] === null && value !== null;
   entry.sets[set] = value;
   // Clearing an added set at the end removes it again.
-  if (value === null && set >= exercise.sets && set === entry.sets.length - 1) entry.sets.pop();
+  if (value === null && set >= plannedSets(exercise, ui.week) && set === entry.sets.length - 1) entry.sets.pop();
   if (value) markTrained(session);
   save();
   if (!fresh) return;
@@ -1236,6 +1338,11 @@ function openEditor(id, index = null) {
   document.getElementById('exercise-days').innerHTML = WEEKDAYS.map((d) => `
     <label class="day-box"><input type="checkbox" name="days" value="${d}"${days.includes(d) ? ' checked' : ''}><span>${shortDay(d)}</span></label>`).join('');
   const partner = e && (e.link ?? state.exercises.find((x) => x.link === e.id)?.id);
+  document.getElementById('exercise-muscle').innerHTML = `<option value="">Not set</option>${MUSCLES
+    .map((m) => `<option value="${m}"${m === e?.muscle ? ' selected' : ''}>${m}</option>`).join('')}`;
+  const loads = [['', 'None: dumbbells, cables or a stack'], ...Object.entries(LOADS).map(([k, l]) => [k, l.bar[state.unit] ? `${l.name[0].toUpperCase()}${l.name.slice(1)}, ${fmt(l.bar[state.unit])} ${state.unit}` : 'Plate-loaded machine'])];
+  document.getElementById('exercise-plates').innerHTML = loads
+    .map(([k, label]) => `<option value="${k}"${k === (e?.plates ?? '') ? ' selected' : ''}>${label}</option>`).join('');
   document.getElementById('exercise-link').innerHTML = `<option value="">None</option>${state.exercises
     .filter((x) => x !== e)
     .map((x) => `<option value="${x.id}"${x.id === partner ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}`;
@@ -1413,7 +1520,9 @@ const FORMS = {
     if (!Number.isInteger(low) || !Number.isInteger(high) || low < 1 || high > 50 || low > high) return toast('Reps go from a lower to a higher number, up to 50.');
     if (!(step > 0) || step > 100) return toast(`Set a weight jump above 0, like ${EXTRA_STEP[state.unit]} ${state.unit}.`);
     if (!Number.isInteger(rest) || rest < 15 || rest > 900) return toast('Rest must be 15 to 900 seconds.');
-    const fields = { name, variants, sets, low, high, step, rest, days };
+    const muscle = MUSCLES.includes(f.muscle.value) ? f.muscle.value : null;
+    const plates = Object.hasOwn(LOADS, f.plates.value) ? f.plates.value : null;
+    const fields = { name, variants, sets, low, high, step, rest, days, muscle, plates };
     const { id, index } = ui.editing;
     let e = id ? exerciseById(id) : null;
     if (e) {
@@ -1422,7 +1531,7 @@ const FORMS = {
       e = newExercise({ ...fields, link: null });
       state.exercises.push(e);
       // Opened from a training day that isn't one of its days: it still shows up on that day.
-      if (index !== null && !days.includes(sessionAt(index).day)) ensureEntry(sessionAt(index), e, defaultVariant(state, e));
+      if (index !== null && !days.includes(sessionAt(index).day)) entryFor(sessionAt(index), e, defaultVariant(state, e));
       if (index !== null) ui.extraOpen = e.id;
     }
     // A pairing that's unchanged keeps its order; a new one puts this exercise first.
@@ -1584,7 +1693,7 @@ const ACTIONS = {
   'extra-set-add'(el) {
     const session = sessionAt(Number(el.dataset.index));
     const e = exerciseById(el.dataset.exercise);
-    const entry = ensureEntry(session, e, entryOf(session, e.id)?.variant ?? defaultVariant(state, e));
+    const entry = entryFor(session, e, entryOf(session, e.id)?.variant ?? defaultVariant(state, e));
     entry.sets.push(null);
     save();
     render();
@@ -1593,7 +1702,7 @@ const ACTIONS = {
   'extra-set-remove'(el) {
     const session = sessionAt(Number(el.dataset.index));
     const e = exerciseById(el.dataset.exercise);
-    const entry = ensureEntry(session, e, entryOf(session, e.id)?.variant ?? defaultVariant(state, e));
+    const entry = entryFor(session, e, entryOf(session, e.id)?.variant ?? defaultVariant(state, e));
     const open = entry.sets.lastIndexOf(null);
     if (open === -1) {
       const last = entry.sets[entry.sets.length - 1];
@@ -1613,7 +1722,7 @@ const ACTIONS = {
   'extra-skip'(el) {
     const session = sessionAt(Number(el.dataset.index));
     const e = exerciseById(el.dataset.exercise);
-    ensureEntry(session, e, defaultVariant(state, e)).skipped = true;
+    entryFor(session, e, defaultVariant(state, e)).skipped = true;
     save();
     render();
   },
@@ -1626,7 +1735,7 @@ const ACTIONS = {
     const session = sessionAt(Number(el.dataset.index));
     const e = exerciseById(el.dataset.exercise);
     const current = entryOf(session, e.id)?.variant ?? defaultVariant(state, e);
-    const entry = ensureEntry(session, e, current);
+    const entry = entryFor(session, e, current);
     entry.variant = e.variants[(e.variants.indexOf(current) + 1) % e.variants.length];
     save();
     render();
@@ -1637,7 +1746,7 @@ const ACTIONS = {
   'extra-pick'(el) {
     const session = sessionAt(ui.sheet.index);
     const e = exerciseById(el.dataset.exercise);
-    ensureEntry(session, e, defaultVariant(state, e));
+    entryFor(session, e, defaultVariant(state, e));
     ui.extraOpen = e.id;
     save();
     pickSheet.close();
@@ -1664,6 +1773,10 @@ const ACTIONS = {
     state.exercises = state.exercises.filter((x) => x !== e);
     save();
     exerciseSheet.close();
+    render();
+  },
+  'muscle-week'(el) {
+    ui.muscleWeek = Math.max(0, Math.min(currentWeek(block()), (ui.muscleWeek ?? currentWeek(block())) + Number(el.dataset.by)));
     render();
   },
   'past-new'() {

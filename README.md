@@ -113,6 +113,16 @@ adds one to that day only.
 - Double progression: each set is prefilled from last time with one more rep, until every set
   reaches the top of the range; then the weight goes up by the jump and reps start from the bottom.
   Tap a light to log it as shown; tap a logged one to change it. Use 0 for body-weight exercises.
+- Weeks 7 and 8 (the taper, then the re-max or deload) are lighter: half the sets, rounded up, repeating
+  last time's weights and reps so the main lifts are fresh. The block after picks up progression from
+  the last full week.
+- An exercise loaded with plates (barbell, 45 lb / 20 kg; EZ bar, 25 lb / 10 kg; or a plate-loaded
+  machine, plates only) shows the plates per side for its next set.
+- Each exercise names the muscle it counts toward, for the weekly set count in History.
+
+Once a day's lift and accessories are all done or skipped, a summary closes the day: the lift's sets
+(and the estimated max from a test set), accessories done and skipped, total volume, and any new bests
+(an accessory beating every earlier session of the same variant).
 
 Apple Health isn't reachable from a web app, so body weight is logged in the app (History → Body).
 
@@ -129,6 +139,10 @@ the app, each block's starting max, and any change from a week 3 test set (the d
 **Add an earlier max** records one from before the app (tap it later to change or delete it), and a
 chart of all of them by date appears. A block's maxes are dated the day it started; set the day you
 actually hit them in Settings → Current maxes.
+
+**Muscles**: hard sets per muscle for a training week, with the week before, against the 10–20 sets a
+week that's a common target for growth. Main lift sets count toward chest (bench), quads (squat) and
+back (deadlift).
 
 **Accessories**: each exercise's heaviest set, estimated max, best session, a chart of its best set
 by session, and recent sessions. **Body**: log today's weight and see it charted.

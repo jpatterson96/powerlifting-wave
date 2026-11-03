@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { newBlock, emptyState, convertState, upgrade, isValidState, estimateMax } from '../logic.js';
 import {
   newExercise, dayExtras, dayGroups, setLink, supersetOrder, ensureEntry, entryOf, exerciseHistory, lastTime,
-  defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras, finishExtras,
+  defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras, finishExtras, plannedSets, isNewBest, muscleSets,
 } from '../extras.js';
 
 const MAX = { squat: 385, bench: 315, deadlift: 455 };
@@ -89,6 +89,48 @@ test('double progression adds a rep a set, then weight once every set tops out',
   assert.deepEqual(suggestion(ex, { sets: Array(3).fill({ weight: 0, reps: 12 }) }), { weights: [0, 0, 0], reps: [13, 13, 13], up: false });
 });
 
+test('weeks 7 and 8 halve the sets and repeat last time, and progression skips over them', () => {
+  const ex = { sets: 3, low: 8, high: 12, step: 5 };
+  assert.deepEqual([0, 5, 6, 7].map((w) => plannedSets(ex, w)), [3, 3, 2, 2]);
+  assert.equal(plannedSets({ ...ex, sets: 1 }, 6), 1);
+  const topped = { sets: [{ weight: 50, reps: 12 }, { weight: 50, reps: 12 }, { weight: 50, reps: 12 }] };
+  assert.deepEqual(suggestion(ex, topped, 6), { weights: [50, 50], reps: [12, 12], up: false });
+  assert.deepEqual(suggestion(ex, { sets: [{ weight: 50, reps: 9 }, { weight: 50, reps: 8 }] }, 7).reps, [9, 8]);
+  const { state, press, b } = setup();
+  ensureEntry(b.log[5][0], press, 'Dumbbell').sets = [{ weight: 50, reps: 12 }, { weight: 50, reps: 12 }, { weight: 50, reps: 11 }];
+  ensureEntry(b.log[6][0], press, 'Dumbbell', 2).sets = [{ weight: 50, reps: 12 }, { weight: 50, reps: 12 }];
+  const next = [1, 0, 0]; // block 2, week 1
+  state.blocks.push(newBlock(MAX, '2026-12-28'));
+  assert.equal(lastTime(state, press.id, 'Dumbbell', next).sets.length, 2); // what was done last
+  assert.equal(lastTime(state, press.id, 'Dumbbell', next, true).sets.length, 3); // what to progress from
+});
+
+test('a new best beats every earlier session of the variant; a first time is not one', () => {
+  const { state, press, b } = setup();
+  const sets = [{ weight: 50, reps: 10 }];
+  assert.equal(isNewBest(state, press.id, 'Dumbbell', [0, 0, 0], sets), false);
+  ensureEntry(b.log[0][0], press, 'Dumbbell').sets = [{ weight: 50, reps: 10 }, null, null];
+  assert.equal(isNewBest(state, press.id, 'Dumbbell', [0, 1, 0], [{ weight: 50, reps: 10 }]), false); // a tie
+  assert.equal(isNewBest(state, press.id, 'Dumbbell', [0, 1, 0], [{ weight: 55, reps: 9 }]), true);
+  assert.equal(isNewBest(state, press.id, 'Machine', [0, 1, 0], [{ weight: 99, reps: 9 }]), false); // other variant
+});
+
+test('weekly sets count the main lift and accessories by muscle, leaving out skips', () => {
+  const { state, press, row, b } = setup();
+  press.muscle = 'Shoulders';
+  const mon = b.log[0][0];
+  mon.reps = [6, 6, null];
+  ensureEntry(mon, press, 'Dumbbell').sets = [{ weight: 50, reps: 10 }, { weight: 50, reps: 9 }, null];
+  ensureEntry(mon, row, null).skipped = true;
+  const tue = b.log[0][1];
+  tue.skipped = true;
+  tue.reps = [5, 5, 5];
+  const counts = muscleSets(state, b.log[0]);
+  assert.deepEqual(Object.fromEntries(counts), { Chest: 2, Shoulders: 2 });
+  ensureEntry(b.log[0][3], row, null).sets = [{ weight: 100, reps: 8 }];
+  assert.equal(muscleSets(state, b.log[0]).get(null), 1); // no muscle set
+});
+
 test('records find the heaviest set, best estimate and biggest session', () => {
   const history = [
     { sets: [{ weight: 50, reps: 12 }, { weight: 50, reps: 12 }] },
@@ -128,6 +170,9 @@ test('bad accessory data is dropped without losing the log', () => {
   const saved = JSON.parse(JSON.stringify(state));
   saved.exercises.push({ id: 'BAD id', name: '<b>' });
   saved.exercises.push({ ...saved.exercises[0], id: 'selfie', link: 'selfie' }); // can't superset with itself
+  saved.exercises[1].muscle = 'Lats'; // not a choice: dropped, the exercise kept
+  saved.exercises[1].plates = 'toString';
+  saved.exercises[2].plates = 'ez';
   saved.blocks[0].log[0][0].extras.push({ exercise: 'x', variant: null, skipped: 'no', sets: [] });
   saved.blocks[0].log[0][1].extras = 'nope';
   saved.blocks[0].log[0][0].date = 'yesterday';
@@ -137,6 +182,8 @@ test('bad accessory data is dropped without losing the log', () => {
   const clean = cleanExtras(upgrade(saved));
   assert.deepEqual(clean.pastMaxes, [{ date: '2025-06-01', lift: 'squat', value: 365 }]);
   assert.deepEqual(clean.blocks[0].maxDates, { squat: '2026-08-15' });
+  assert.equal('muscle' in clean.exercises[1] || 'plates' in clean.exercises[1], false);
+  assert.equal(clean.exercises[2].plates, 'ez');
   assert.equal(isValidState(clean), true);
   assert.equal(clean.exercises.length, 3);
   assert.equal(clean.blocks[0].log[0][0].extras.length, 1);

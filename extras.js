@@ -1,10 +1,27 @@
 // Accessory exercises: the lifter's own list, logged with each training day and progressed by rep range
 // (double progression). No DOM access here so it can be tested in Node.
-import { LIFTS, estimateMax, tidy } from './logic.js';
+import { LIFTS, BAR, FINISH_WEEK, estimateMax, tidy } from './logic.js';
 
 export const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 export const EXTRA_DEFAULTS = { sets: 3, low: 8, high: 12, rest: 90 };
 export const EXTRA_STEP = { lb: 5, kg: 2.5 };
+
+// What a muscle gets credit for in the weekly set count. Each exercise names one; the main lifts count
+// toward the muscle they train most.
+export const MUSCLES = ['Chest', 'Shoulders', 'Triceps', 'Back', 'Biceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Abs', 'Other'];
+export const LIFT_MUSCLE = { bench: 'Chest', squat: 'Quads', deadlift: 'Back' };
+
+// How an exercise is loaded with plates, and what's on before them: plate math uses it.
+export const LOADS = {
+  barbell: { name: 'barbell', bar: BAR },
+  ez: { name: 'EZ bar', bar: { lb: 25, kg: 10 } },
+  machine: { name: 'plate-loaded machine', bar: { lb: 0, kg: 0 } },
+};
+
+// Weeks 7 and 8 (the taper, then the re-max or deload) cut accessories to half the sets at the same
+// weights and reps, so the main lifts are fresh. They're never "last time" for progressing afterwards.
+export const isLightWeek = (week) => week >= FINISH_WEEK - 1;
+export const plannedSets = (exercise, week) => (isLightWeek(week) ? Math.ceil(exercise.sets / 2) : exercise.sets);
 
 let counter = 0;
 const makeId = () => `x${Date.now().toString(36)}${(counter++).toString(36)}`;
@@ -64,11 +81,11 @@ export function supersetOrder(counts) {
 
 export const entryOf = (session, id) => session.extras?.find((x) => x.exercise === id) ?? null;
 
-// Creates the day's record for an exercise the first time anything is logged against it.
-export function ensureEntry(session, exercise, variant) {
+// Creates the day's record for an exercise the first time anything is logged against it, with `count` sets.
+export function ensureEntry(session, exercise, variant, count = exercise.sets) {
   let entry = entryOf(session, exercise.id);
   if (!entry) {
-    entry = { exercise: exercise.id, variant, skipped: false, sets: Array(exercise.sets).fill(null) };
+    entry = { exercise: exercise.id, variant, skipped: false, sets: Array(count).fill(null) };
     session.extras = [...(session.extras ?? []), entry];
   }
   return entry;
@@ -108,10 +125,24 @@ export function exerciseHistory(state, id) {
 
 const before = (at, here) => !at || at[0] < here[0] || (at[0] === here[0] && (at[1] < here[1] || (at[1] === here[1] && at[2] < here[2])));
 
-// The most recent earlier session with this exercise and variant, or null.
-export function lastTime(state, id, variant, here) {
-  const earlier = exerciseHistory(state, id).filter((h) => h.variant === variant && before(h.at, here));
+// The most recent earlier session with this exercise and variant, or null. `full` passes over the lighter
+// weeks, for the session to progress from.
+export function lastTime(state, id, variant, here, full = false) {
+  const earlier = exerciseHistory(state, id)
+    .filter((h) => h.variant === variant && before(h.at, here) && !(full && h.at && isLightWeek(h.at[1])));
   return earlier[earlier.length - 1] ?? null;
+}
+
+// Whether a day's sets beat every earlier session of the same variant: a higher estimated max, or more reps
+// for body-weight work. A first time isn't a best.
+export function isNewBest(state, id, variant, here, sets) {
+  const earlier = exerciseHistory(state, id).filter((h) => h.variant === variant && before(h.at, here));
+  if (!earlier.length || !sets.length) return false;
+  const today = sessionBest(sets);
+  return earlier.every((h) => {
+    const was = sessionBest(h.sets);
+    return was.kind !== today.kind || today.value > was.value;
+  }) && earlier.some((h) => sessionBest(h.sets).kind === today.kind);
 }
 
 // The variant to show when nothing is logged yet today: whatever was used last, else the first.
@@ -123,13 +154,14 @@ export function defaultVariant(state, exercise) {
 
 // Double progression: keep the weight and add a rep per set until every set reaches the top of the range,
 // then add a step of weight and start again from the bottom. Body-weight work (logged as 0) just keeps
-// adding reps.
-export function suggestion(exercise, last) {
-  const n = exercise.sets;
+// adding reps. In a lighter week it's fewer sets, repeating last time.
+export function suggestion(exercise, last, week = 0) {
+  const n = plannedSets(exercise, week);
+  const light = isLightWeek(week);
   if (!last) return { weights: Array(n).fill(null), reps: Array(n).fill(exercise.low), up: false };
   const sets = last.sets;
   const loaded = sets.some((s) => s.weight > 0);
-  const up = loaded && sets.length >= n && sets.every((s) => s.reps >= exercise.high);
+  const up = !light && loaded && sets.length >= exercise.sets && sets.every((s) => s.reps >= exercise.high);
   if (up) {
     const weight = tidy(Math.max(...sets.map((s) => s.weight)) + exercise.step);
     return { weights: Array(n).fill(weight), reps: Array(n).fill(exercise.low), up };
@@ -138,7 +170,7 @@ export function suggestion(exercise, last) {
   const top = loaded ? exercise.high : 100;
   return {
     weights: Array.from({ length: n }, (_, i) => at(i).weight),
-    reps: Array.from({ length: n }, (_, i) => Math.min(top, Math.max(exercise.low, (sets[i]?.reps ?? exercise.low - 1) + 1))),
+    reps: Array.from({ length: n }, (_, i) => Math.min(top, Math.max(exercise.low, light ? at(i).reps : (sets[i]?.reps ?? exercise.low - 1) + 1))),
     up,
   };
 }
@@ -168,6 +200,20 @@ export function records(history) {
   return { heaviest, best, volume: tidy(volume) };
 }
 
+// Hard sets per muscle in one training week: the main lift's logged sets and every accessory set logged.
+// An exercise with no muscle counts under null.
+export function muscleSets(state, sessions) {
+  const count = new Map();
+  const add = (muscle, n) => n && count.set(muscle, (count.get(muscle) ?? 0) + n);
+  for (const s of sessions) {
+    if (!s.skipped) add(LIFT_MUSCLE[s.lift], s.reps.filter((r) => r !== null).length);
+    for (const x of s.extras ?? []) {
+      if (!x.skipped) add(state.exercises.find((e) => e.id === x.exercise)?.muscle ?? null, x.sets.filter(Boolean).length);
+    }
+  }
+  return count;
+}
+
 // Body weight entries stay one per day, oldest first.
 export function logBodyweight(state, date, weight) {
   state.bodyweight = [...state.bodyweight.filter((e) => e.date !== date), { date, weight }]
@@ -179,6 +225,13 @@ export function logBodyweight(state, date, weight) {
 const isDate = (d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d);
 const text = (s, max) => typeof s === 'string' && s.trim().length > 0 && s.length <= max;
 const int = (n, lo, hi) => Number.isInteger(n) && n >= lo && n <= hi;
+
+// A muscle or plate setting that isn't one of the choices is dropped, keeping the exercise.
+function cleanChoices(e) {
+  if (e && e.muscle !== undefined && e.muscle !== null && !MUSCLES.includes(e.muscle)) delete e.muscle;
+  if (e && e.plates !== undefined && e.plates !== null && !(typeof e.plates === 'string' && Object.hasOwn(LOADS, e.plates))) delete e.plates;
+  return e;
+}
 
 function validExercise(e) {
   return Boolean(e) && typeof e.id === 'string' && /^[a-z0-9]{1,24}$/.test(e.id) && text(e.name, 60) &&
@@ -200,7 +253,7 @@ const validMax = (n) => typeof n === 'number' && n > 0 && n < 5000;
 // Drops anything malformed in the optional data (accessories, body weight, earlier maxes and the days maxes
 // were set) instead of rejecting the whole log, and fills in the fields older logs don't have.
 export function cleanExtras(state) {
-  state.exercises = Array.isArray(state.exercises) ? state.exercises.filter(validExercise) : [];
+  state.exercises = Array.isArray(state.exercises) ? state.exercises.map(cleanChoices).filter(validExercise) : [];
   state.bodyweight = Array.isArray(state.bodyweight)
     ? state.bodyweight.filter((e) => e && isDate(e.date) && typeof e.weight === 'number' && e.weight > 0) : [];
   if (state.imported !== undefined) {

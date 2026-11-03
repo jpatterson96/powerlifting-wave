@@ -1160,6 +1160,49 @@ legend.setting-title + * {
   font-variant-numeric: tabular-nums;
 }
 
+.extra-plates {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The end of a finished day: what was lifted, and any new bests. */
+.day-summary {
+  margin-top: 22px;
+  padding: 16px 16px 18px;
+  border: 1.5px solid var(--steel);
+  border-radius: 14px;
+}
+
+.summary-title {
+  font: 700 24px/1 var(--display);
+}
+
+.summary-list {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+}
+
+.summary-list div {
+  display: grid;
+  grid-template-columns: 7.5em 1fr;
+  gap: 12px;
+}
+
+.summary-list dt {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.summary-list dd {
+  margin: 0;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
 .extra-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1951,4 +1994,85 @@ legend.setting-title + * {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* ---------- Sets per muscle ---------- */
+
+.week-step {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  margin-top: 18px;
+}
+
+.week-step-label {
+  font: 700 26px/1 var(--display);
+  text-align: center;
+}
+
+.muscle-list {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.muscle-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 6px 12px;
+  padding: 10px 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.muscle-name {
+  font: 700 20px/1.1 var(--display);
+}
+
+.muscle-count {
+  color: var(--chalk);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.muscle-count strong {
+  font: 700 20px/1 var(--display);
+}
+
+.muscle-was {
+  color: var(--muted);
+}
+
+.muscle-row.is-empty .muscle-name,
+.muscle-row.is-empty .muscle-count strong {
+  color: var(--muted);
+}
+
+/* The track runs past 20 sets; the shaded band marks the 10–20 target. */
+.muscle-track {
+  position: relative;
+  grid-column: 1 / -1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.muscle-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--steel);
+  opacity: 0.55;
+}
+
+.muscle-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  max-width: 100%;
+  border-radius: 4px;
+  background: var(--series-1);
 }

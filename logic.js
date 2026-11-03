@@ -184,8 +184,9 @@ export function restSeconds(session, week, nextSet) {
 }
 
 // Greedy works because each plate set is listed heaviest first and every size is loadable.
-export function platesPerSide(total, unit) {
-  let side = (total - BAR[unit]) / 2;
+// `bar` is what's loaded before any plates: a barbell by default, 0 for a plate-loaded machine.
+export function platesPerSide(total, unit, bar = BAR[unit]) {
+  let side = (total - bar) / 2;
   const plates = [];
   if (side <= 0) return plates;
   for (const p of PLATES[unit]) {

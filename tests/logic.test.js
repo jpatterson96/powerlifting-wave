@@ -56,6 +56,8 @@ test('plates per side are greedy from the heaviest plate', () => {
   assert.deepEqual(platesPerSide(45, 'lb'), []);
   assert.deepEqual(platesPerSide(30, 'lb'), []);
   assert.deepEqual(platesPerSide(142.5, 'kg'), [25, 25, 10, 1.25]);
+  assert.deepEqual(platesPerSide(65, 'lb', 25), [10, 10]); // EZ bar
+  assert.deepEqual(platesPerSide(180, 'lb', 0), [45, 45]); // plate-loaded machine
 });
 
 test('warm-ups ramp up and stay below the working weight', () => {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { PICS, picFor, picFile } from '../pics.js';
 import { emptyState, newBlock } from '../logic.js';
 import { newExercise, cleanExtras } from '../extras.js';
@@ -17,18 +17,18 @@ const MINE = {
   'Seated barbell overhead press': 'overhead-press-barbell',
   'Incline barbell bench press': 'incline-barbell-press',
   'Dips': 'dips',
-  'Plate loaded lat pulldown, neutral grip': 'lat-pulldown',
+  'Plate loaded lat pulldown, neutral grip': 'lat-pulldown-vbar',
   'Inverted row, overhand grip': 'inverted-row',
   'Bent over barbell row, overhand grip': 'bent-over-row',
   'Single arm chest supported low row': 'one-arm-row',
   'Chest supported row, neutral narrow grip': 'chest-supported-row',
-  'Behind the neck lat pulldown': 'lat-pulldown-behind',
+  'Behind the neck lat pulldown': 'lat-pulldown-wide',
   'Preacher curl machine': 'preacher-curl',
   'Seated cable row, neutral grip': 'seated-cable-row',
-  'EZ bar preacher curl': 'preacher-curl',
+  'EZ bar preacher curl': 'preacher-curl-barbell',
   'Dumbbell reverse fly': 'reverse-fly',
-  'Underhand grip lat pulldown': 'lat-pulldown-underhand',
-  'Neutral grip lat pulldown': 'lat-pulldown-machine',
+  'Underhand grip lat pulldown': 'lat-pulldown',
+  'Neutral grip lat pulldown': 'lat-pulldown-vbar',
   'Barbell hip thrust': 'hip-thrust',
   'Leg press, wide stance': 'leg-press',
   'Calf raise on leg press': 'leg-press-calf',
@@ -58,17 +58,21 @@ test('a chosen picture wins, an unknown one is ignored, and a name nothing fits 
 });
 
 test('other common names land somewhere sensible', () => {
-  const cases = { 'Barbell back squat': 'squat', 'Romanian deadlift': 'deadlift', 'Pull-up': 'pull-up', 'Chin up': 'pull-up', 'Walking lunge': 'lunge',
-    'Standing calf raise': 'standing-calf-raise', 'Dumbbell curl': 'dumbbell-curl', 'EZ bar curl': 'barbell-curl', 'Skull crusher': 'skull-crusher',
-    'Overhead triceps extension': 'skull-crusher', 'Dumbbell shrug': 'shrug', 'Face pull': 'reverse-fly', 'Pec deck': 'cable-fly', 'Push-up': 'push-up',
-    'Plank': 'crunch', 'Bench press': 'bench-press', 'Dumbbell shoulder press': 'shoulder-press-dumbbell', 'Machine row': 'chest-supported-row' };
+  const cases = { 'Barbell back squat': 'squat', 'Romanian deadlift': 'deadlift', 'Pull-up': 'pull-up', 'Chin up': 'pull-up', 'Walking lunge': 'pistol-squat',
+    'Box step-up': 'step-up', 'Standing calf raise': 'standing-calf-raise', 'Dumbbell curl': 'dumbbell-curl', 'EZ bar curl': 'barbell-curl', 'Skull crusher': 'skull-crusher',
+    'Overhead triceps extension': 'skull-crusher', 'Dumbbell shrug': 'shrug', 'Face pull': 'face-pull', 'Pec deck': 'pec-deck', 'Push-up': 'push-up',
+    'Plank': 'crunch', 'Bench press': 'bench-press', 'Dumbbell shoulder press': 'shoulder-press-dumbbell', 'Machine row': 'chest-supported-row',
+    'One arm dumbbell row': 'one-arm-row', 'Dumbbell row': 'dumbbell-row', 'Glute bridge': 'glute-bridge', 'Wide grip pulldown': 'lat-pulldown-wide', 'Close grip pulldown': 'lat-pulldown-vbar' };
   for (const [name, key] of Object.entries(cases)) assert.equal(picFor({ name }), key, name);
 });
 
-test('every picture has its file, and the keys are unique', () => {
+test('every picture has its SVG file, the keys are unique, and the service worker caches each one', () => {
   const keys = PICS.map(([key]) => key);
   assert.equal(new Set(keys).size, keys.length);
   for (const key of keys) assert.ok(existsSync(new URL(`../${picFile(key)}`, import.meta.url)), key);
+  assert.equal(picFile('leg-press'), 'pics/leg-press.svg');
+  const sw = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+  for (const key of keys) assert.ok(sw.includes(`'${key}'`), `sw.js lists ${key}`);
 });
 
 test('a saved picture that is not one of the choices is dropped on load, a real one kept', () => {

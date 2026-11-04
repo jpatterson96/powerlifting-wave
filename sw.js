@@ -1,5 +1,5 @@
 // Bump the version whenever any file changes so phones pick up the new copy.
-const CACHE = 'wave-v14';
+const CACHE = 'wave-v15';
 const FILES = [
   './',
   'index.html',
@@ -19,12 +19,13 @@ const FILES = [
   'icons/icon-192.png',
   'icons/icon-512.png',
   // The exercise pictures, one per key in pics.js.
-  ...['leg-press-calf', 'leg-press', 'seated-calf-raise', 'standing-calf-raise', 'hack-squat', 'lunge', 'squat', 'leg-extension',
-    'lying-leg-curl', 'seated-leg-curl', 'hip-thrust', 'deadlift', 'preacher-curl', 'barbell-curl', 'dumbbell-curl', 'skull-crusher',
-    'pushdown', 'dips', 'lat-pulldown-behind', 'lat-pulldown-underhand', 'lat-pulldown-machine', 'lat-pulldown', 'pull-up', 'inverted-row',
-    'one-arm-row', 'chest-supported-row', 'seated-cable-row', 'bent-over-row', 'reverse-fly', 'cable-fly', 'lateral-raise', 'shrug',
-    'shoulder-press-dumbbell', 'overhead-press-barbell', 'shoulder-press-machine', 'incline-dumbbell-press', 'incline-barbell-press',
-    'dumbbell-bench-press', 'chest-press-machine', 'bench-press', 'crunch', 'push-up'].map((k) => `pics/${k}.png`),
+  ...['leg-press-calf', 'leg-press', 'seated-calf-raise', 'standing-calf-raise', 'hack-squat', 'step-up', 'pistol-squat', 'squat',
+    'leg-extension', 'lying-leg-curl', 'seated-leg-curl', 'hip-thrust', 'glute-bridge', 'deadlift', 'preacher-curl-barbell', 'preacher-curl',
+    'barbell-curl', 'dumbbell-curl', 'skull-crusher', 'pushdown', 'dips', 'lat-pulldown-wide', 'lat-pulldown-vbar', 'lat-pulldown', 'pull-up',
+    'inverted-row', 'one-arm-row', 'chest-supported-row', 'seated-cable-row', 'dumbbell-row', 'bent-over-row', 'face-pull', 'reverse-fly',
+    'pec-deck', 'cable-fly', 'lateral-raise', 'shrug', 'shoulder-press-dumbbell', 'overhead-press-barbell', 'shoulder-press-machine',
+    'incline-dumbbell-press', 'incline-barbell-press', 'dumbbell-bench-press', 'chest-press-machine', 'bench-press', 'crunch', 'push-up',
+  ].map((k) => `pics/${k}.svg`),
 ];
 
 self.addEventListener('install', (event) => {

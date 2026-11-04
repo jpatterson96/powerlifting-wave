@@ -1316,7 +1316,7 @@ function exercisesSection() {
     <p class="hint">Your exercises, the days they show up on, and their rep ranges. They're listed under each day's main lift in this order.</p>
     ${rows ? `<ol class="index-list">${rows}</ol>` : ''}
     <button class="btn" data-action="exercise-new">Add an exercise</button>
-    <p class="hint credit">Exercise pictures by <a href="https://www.flaticon.com/authors/leremy" target="_blank" rel="noopener">Leremy</a>, from <a href="https://www.flaticon.com/" target="_blank" rel="noopener">Flaticon</a>.</p>
+    <p class="hint credit">Exercise drawings from <a href="https://github.com/AlexMollard/Open-Exercise-Art" target="_blank" rel="noopener">Open Exercise Art</a> by Alex Mollard, <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>, with their lines thickened.</p>
   </section>`;
 }
 

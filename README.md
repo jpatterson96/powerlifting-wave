@@ -98,9 +98,10 @@ results. A weight is typed on the app's own keypad in the sheet, with − and + 
 
 ## Accessories
 
-Your own exercises, listed under each day's main lift. **Settings → Accessories** sets each one's
-days, sets, rep range (e.g. 3 × 8–12), weight jump and rest; **Add an exercise** on a training day
-adds one to that day only.
+Your own exercises, listed under each day's main lift. **Settings → Accessories** shows them by kind
+of day (bench days, squat days, deadlift day) and sets each one's days, sets, rep range
+(e.g. 3 × 8–12), weight jump and rest; the arrows put a day's exercises in the order you do them.
+**Add an exercise** on a training day adds one to that day only.
 
 - **Skip** on an accessory's line (or **Skip today** inside it) for anything you don't do that day;
   nothing is counted against it. **Undo** brings it back.
@@ -147,11 +148,21 @@ Apple Health isn't reachable from a web app, so body weight is logged in the app
 
 ## PRs
 
-The PRs tab shows your best squat, bench and deadlift, each loaded on a bar with the plates per side,
-and the three added up as your total, with how far it has come since your first one. A record is a lift
-you did: the maxes you entered when you started, maxes added in History → Lifts (with the day you hit
-them), and good re-max attempts. Estimates from "2+" sets don't count, and neither does the max a later
-block starts from, since that's the review's number.
+The PRs tab is a wall, not a list: your total, then your best squat, bench and deadlift, each on a bar
+loaded with the plates per side, the whole screen and not a word on it. The squat bar is racked, the bench
+bar sits over its bench and the deadlift bar is on the floor, so the three tell themselves apart. When the
+page opens each bar drops in, the plates fly on a pair at a time while the steel digits over it climb with
+the load, the collars lock in a puff of chalk, and a shine runs over the digits and the bars once the total is
+up; the floor is polished, so each bar shows faintly upside down beneath itself. A record is
+a lift you did: the maxes you entered when you started, maxes added in History → Lifts (with the day you
+hit them), and good re-max attempts. Estimates from "2+" sets don't count, and neither does the max a
+later block starts from, since that's the review's number.
+
+When a re-max attempt beats every record, the screen goes dark the moment you mark it a good lift. Three
+white lights come on, that lift's bar drops in loaded to the old record with the old number hollow over it,
+the collars come off, the plates that change fly off and the new ones fly on, the number turns to steel and
+reads the new record, and the collars lock with a flash and a cloud of chalk. The gain shows under the bar.
+Tap anywhere to get back to your day. Only a single on a re-max day can set it off, never a "2+" set.
 
 ## History
 

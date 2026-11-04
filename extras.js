@@ -1,9 +1,17 @@
 // Accessory exercises: the lifter's own list, logged with each training day and progressed by rep range
 // (double progression). No DOM access here so it can be tested in Node.
-import { LIFTS, BAR, FINISH_WEEK, estimateMax, tidy } from './logic.js';
+import { LIFTS, SCHEDULE, BAR, FINISH_WEEK, estimateMax, tidy } from './logic.js';
 import { picKeys } from './pics.js';
 
 export const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+// The week's three kinds of day, named for their lift: Monday and Thursday share their accessories (bench),
+// as do Tuesday and Friday (squat), and Wednesday (deadlift) is on its own.
+export const DAY_KINDS = SCHEDULE.reduce((kinds, s) => {
+  const kind = kinds.find((k) => k.lift === s.lift);
+  if (kind) kind.days.push(s.day);
+  else kinds.push({ lift: s.lift, days: [s.day] });
+  return kinds;
+}, []);
 export const EXTRA_DEFAULTS = { sets: 3, low: 8, high: 12, rest: 90 };
 export const EXTRA_STEP = { lb: 5, kg: 2.5 };
 
@@ -44,6 +52,28 @@ export function dayExtras(state, session) {
     .map((x) => state.exercises.find((e) => e.id === x.exercise))
     .filter((e) => e && !listed.includes(e));
   return [...listed, ...added];
+}
+
+// The exercise list split by kind of day, for Settings: each kind lists, in list order, every exercise on
+// one of its days, and anything with no days comes last under a null lift. An exercise on two kinds of
+// day is listed under both.
+export function exercisesByDay(state) {
+  const kinds = DAY_KINDS.map((k) => ({ ...k, exercises: state.exercises.filter((e) => e.days.some((d) => k.days.includes(d))) }));
+  const unset = state.exercises.filter((e) => !e.days.length);
+  return unset.length ? [...kinds, { lift: null, days: [], exercises: unset }] : kinds;
+}
+
+// Moves an exercise one place up (by -1) or down (by 1) among `among`, some of the list in list order, by
+// putting it just past the neighbour it steps over. The one list orders every day, so it may pass exercises
+// of other days on the way. Returns false at the end of `among`.
+export function moveExercise(state, exercise, by, among = state.exercises) {
+  const k = among.indexOf(exercise);
+  const over = k < 0 ? null : among[k + by];
+  if (!over) return false;
+  const rest = state.exercises.filter((e) => e !== exercise);
+  rest.splice(rest.indexOf(over) + (by > 0 ? 1 : 0), 0, exercise);
+  state.exercises = rest;
+  return true;
 }
 
 // The day's accessories in the order they're done: single exercises, and supersets as pairs. An exercise's

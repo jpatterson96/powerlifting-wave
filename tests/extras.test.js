@@ -4,7 +4,7 @@ import { newBlock, emptyState, convertState, upgrade, isValidState, estimateMax 
 import {
   newExercise, dayExtras, dayGroups, setLink, supersetOrder, ensureEntry, entryOf, exerciseHistory, lastTime,
   defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras, finishExtras, plannedSets, isNewBest, muscleSets,
-  isCounted, loadOf, workoutTime, timedSessions,
+  isCounted, loadOf, workoutTime, timedSessions, exercisesByDay, moveExercise,
 } from '../extras.js';
 
 const MAX = { squat: 385, bench: 315, deadlift: 455 };
@@ -262,4 +262,32 @@ test('workout times that do not read as times are dropped, keeping the sets', ()
   assert.equal(s.times, undefined);
   assert.deepEqual(s.extras[0].sets[0], { weight: 50, reps: 12 });
   assert.equal(s.extras[0].sets[1].at, '2026-11-02T17:40:00.000Z');
+});
+
+test('settings split the exercises by kind of day, and a move steps over the next of the same days', () => {
+  const { state, press, row, curl } = setup();
+  const legs = newExercise({ name: 'Leg press', variants: [], sets: 3, low: 8, high: 12, step: 1, rest: 90, days: ['Tuesday', 'Friday'] });
+  const fly = newExercise({ name: 'Fly', variants: [], sets: 3, low: 10, high: 15, step: 5, rest: 60, days: ['Thursday', 'Wednesday'] });
+  state.exercises.push(legs, fly);
+  const names = (kinds) => kinds.map((k) => [k.lift, k.days, k.exercises.map((e) => e.name)]);
+  assert.deepEqual(names(exercisesByDay(state)), [
+    ['bench', ['Monday', 'Thursday'], ['Shoulder press', 'Row', 'Fly']],
+    ['squat', ['Tuesday', 'Friday'], ['Leg press']],
+    ['deadlift', ['Wednesday'], ['Fly']],
+    [null, [], ['Curl']],
+  ]);
+  // Down from the row steps over the fly, the next bench-day exercise, not the curl next in the list.
+  const bench = () => exercisesByDay(state)[0].exercises;
+  assert.equal(moveExercise(state, row, 1, bench()), true);
+  assert.deepEqual(state.exercises.map((e) => e.name), ['Shoulder press', 'Curl', 'Leg press', 'Fly', 'Row']);
+  assert.deepEqual(bench().map((e) => e.name), ['Shoulder press', 'Fly', 'Row']);
+  assert.equal(moveExercise(state, row, 1, bench()), false);
+  assert.equal(moveExercise(state, press, -1, bench()), false);
+  assert.equal(moveExercise(state, fly, -1, bench()), true);
+  assert.deepEqual(state.exercises.map((e) => e.name), ['Fly', 'Shoulder press', 'Curl', 'Leg press', 'Row']);
+  // Without an exercise lacking days there's no fourth group, and the list as a whole can be moved in too.
+  state.exercises = state.exercises.filter((e) => e !== curl);
+  assert.equal(exercisesByDay(state).length, 3);
+  assert.equal(moveExercise(state, legs, -1), true);
+  assert.deepEqual(state.exercises.map((e) => e.name), ['Fly', 'Leg press', 'Shoulder press', 'Row']);
 });

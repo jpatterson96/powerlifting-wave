@@ -3,16 +3,17 @@ import {
   prescription, ROUNDING, REST_MODES, BAR, tidy, roundTo, workingMax, targetWeight, estimateMax, weekMax, attemptBase, attemptWeight, setWeight,
   singleWeight, restSeconds, platesPerSide, warmups, emptyState, newBlock, finishFor, setFinish, sessionStatus,
   weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak, restartBlock, evaluateLift, liftHistory,
-  maxChanges, liftRecord, totalHistory, convertState, upgrade,
+  maxChanges, liftRecord, convertState, upgrade,
 } from './logic.js';
 import {
   WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, isCounted, loadOf, isLightWeek, plannedSets, newExercise,
-  dayExtras, dayGroups, setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, lastTime, isNewBest, defaultVariant,
+  dayExtras, dayGroups, exercisesByDay, moveExercise, setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, lastTime, isNewBest, defaultVariant,
   suggestion, sessionBest, records, muscleSets, workoutTime, timedSessions, logBodyweight, cleanExtras,
 } from './extras.js';
 import { mergeLogs } from './merge.js';
 import { press, typed, nudge } from './pad.js';
 import { PICS, picFor, picFile } from './pics.js';
+import { showPlan, prShow, stepAt } from './show.js';
 import * as sync from './sync.js';
 import * as rest from './rest.js';
 import { maxChart, volumeChart, progressChart } from './charts.js';
@@ -30,6 +31,7 @@ const exerciseForm = document.getElementById('exercise-form');
 const pastSheet = document.getElementById('past-sheet');
 const pastForm = document.getElementById('past-form');
 const restoreInput = document.getElementById('restore-input');
+const moment = document.getElementById('pr-moment');
 
 let state = load();
 // `open` is the index of the expanded day in the shown week; undefined means "pick the next day to train".
@@ -174,6 +176,10 @@ function render() {
   const focusKey = document.activeElement?.dataset?.key;
   const hasBlock = state.blocks.length > 0;
   tabs.hidden = !hasBlock;
+  // The PRs page is the whole screen, with nothing to scroll.
+  const showing = hasBlock && ui.tab === 'prs';
+  view.classList.toggle('is-show', showing);
+  document.body.classList.toggle('is-show', showing);
   if (!hasBlock) {
     view.innerHTML = setupView();
   } else {
@@ -181,7 +187,10 @@ function render() {
       t.setAttribute('aria-current', t.dataset.tab === ui.tab ? 'page' : 'false');
     }
     if (ui.tab === 'history') view.innerHTML = historyView();
-    else if (ui.tab === 'prs') view.innerHTML = prsView();
+    else if (ui.tab === 'prs') {
+      view.innerHTML = prsView();
+      runShow();
+    }
     else if (ui.tab === 'settings') view.innerHTML = settingsView();
     else view.innerHTML = ui.reviewing ? reviewView() : trainView();
   }
@@ -772,77 +781,241 @@ function barbell(total, attempt) {
   </figure>`;
 }
 
-// ---------- PRs ----------
+// ---------- PRs: the show ----------
 
 const big = (n) => (Math.round(n * 100) / 100).toLocaleString();
 
 // How much sleeve a stack of plates takes: the shoulder, each plate with its gap, and the collar.
 const stackWidth = (plates) => 12 + plates.reduce((sum, p) => sum + PLATE_STYLE[state.unit][p][2] + 2, 0) + 5;
 
-// A loaded barbell seen from the side, plates on both sleeves. `sleeve` is shared by a page's bars so the
-// plates are the same size on each. They slide on when the page opens.
-function loadedBar(plates, sleeve) {
-  const H = 76;
+// Where each lift starts, which tells the bars apart without a word: the squat bar racked, the bench bar over its
+// bench, the deadlift bar on the floor.
+const STATION = { squat: 'rack', bench: 'bench', deadlift: 'floor' };
+
+// The shaft between the sleeves, in bar units; the page needs it for the bars' aspect ratio.
+const SHAFT = 150;
+
+// Chalk dust off each collar as it locks: how far each speck drifts, and its size.
+const DUST = [[14, -12, 1.6], [20, -4, 1.2], [12, 8, 1.4], [8, -18, 1.1], [22, -14, 1.8], [16, 2, 1]];
+
+// A record on its bar, seen from the front. The station fades in, the empty bar drops into it, the plates fly on
+// from both ends a pair at a time and the collars lock last, on the delays in `lift` (see show.js); the number
+// above it is stepped by runShow on the same clock. `sleeve` is shared by the page's bars so their plates match.
+// The PR moment's bar arrives loaded instead (`lift.keep` stays on, `lift.off` flies off, `lift.on` flies on) and
+// throws a bigger cloud of chalk (`burst`).
+function showBar(lift, id, i, sleeve, burst = false) {
+  const H = 100;
   const mid = H / 2;
-  const shaft = 150;
+  const shaft = SHAFT;
   const W = shaft + 2 * sleeve;
-  const side = (dir) => {
+  const centre = sleeve + shaft / 2;
+  const posts = [sleeve + 26, sleeve + shaft - 32];
+  const station = STATION[id];
+  const shine = `url(#gleam-${i})`;
+  let behind = '';
+  let front = '';
+  if (station !== 'floor') {
+    // Uprights behind the bar, and the J-hooks it sits in over its lower half.
+    const top = station === 'rack' ? 12 : mid + 2;
+    behind += posts.map((x) => `<rect x="${x}" y="${top}" width="6" height="${H - top}" fill="var(--steel)" opacity="0.55"/>`).join('');
+    front += posts.map((x) => `<rect x="${x - 1}" y="${mid - 1}" width="8" height="12" rx="1.5" fill="var(--steel)"/>`).join('');
+  }
+  if (station === 'bench') {
+    behind += `<rect x="${centre - 5}" y="${mid + 30}" width="10" height="${H - mid - 30}" fill="var(--steel)" opacity="0.55"/>
+      <rect x="${centre - 22}" y="${mid + 20}" width="44" height="10" rx="3" fill="var(--surface)" stroke="var(--steel)" stroke-width="1.5"/>`;
+  }
+  if (station === 'floor') behind += `<rect x="0" y="${mid + 28}" width="${W}" height="3" rx="1.5" fill="var(--steel)"/>`;
+  const body = (fill) => `<rect x="0" y="${mid - 4.5}" width="${sleeve}" height="9" rx="2" fill="${fill}"/>
+    <rect x="${sleeve + shaft}" y="${mid - 4.5}" width="${sleeve}" height="9" rx="2" fill="${fill}"/>
+    <rect x="${sleeve}" y="${mid - 3.5}" width="${shaft}" height="7" fill="${fill}"/>`;
+  const knurl = `<rect x="${sleeve + 10}" y="${mid - 3.5}" width="${shaft * 0.3}" height="7" fill="rgba(0,0,0,0.18)"/>
+    <rect x="${sleeve + shaft * 0.7 - 10}" y="${mid - 3.5}" width="${shaft * 0.3}" height="7" fill="rgba(0,0,0,0.18)"/>`;
+  // What the bar arrives with, what comes off it and what flies on. A record on the PRs page flies on whole.
+  const keep = lift.keep ?? [];
+  const off = lift.off ?? [];
+  const on = lift.on ?? lift.plates;
+  const onAt = lift.onAt ?? lift.plateAt;
+  const plateFill = (p) => (PLATE_STYLE[state.unit][p][0] === 'chrome' ? 'var(--chrome)' : `var(--plate-${PLATE_STYLE[state.unit][p][0]})`);
+  // Black plates get a light rim, or they vanish into the dark.
+  const rim = (p) => `stroke="${PLATE_STYLE[state.unit][p][0] === 'black' ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.3)'}"`;
+  // One side's shoulder, plates and collar. `lit` draws the same shapes in the shine gradient, for the finale.
+  const side = (dir, lit) => {
     const shoulder = dir < 0 ? sleeve : sleeve + shaft;
-    const parts = [`<rect x="${dir < 0 ? shoulder - 7 : shoulder}" y="${mid - 9}" width="7" height="18" rx="1.5" fill="var(--chrome)"/>`];
+    const from = dir * (sleeve + 40);
+    const rect = (x, w, h, fill, extra = '') => `<rect x="${x}" y="${mid - h / 2}" width="${w}" height="${h}" rx="1.5" fill="${fill}"${extra && ` ${extra}`}/>`;
+    const flyOn = (k) => `class="show-plate" style="--d:${onAt(k)}ms;--from:${from}px;--o:${dir < 0 ? 100 : 0}%"`;
+    const flyOff = (at) => `class="show-plate-off" style="--d:${at}ms;--from:${from}px"`;
+    const parts = [rect(dir < 0 ? shoulder - 7 : shoulder, 7, 18, lit ? shine : 'var(--chrome)')];
     let x = shoulder + dir * 12;
-    plates.forEach((p, k) => {
-      const [colour, h, w] = PLATE_STYLE[state.unit][p];
-      const fill = colour === 'chrome' ? 'var(--chrome)' : `var(--plate-${colour})`;
-      parts.push(`<rect class="bar-plate" style="--k:${k};--from:${dir * 40}px" x="${dir < 0 ? x - w : x}" y="${mid - h / 2}" width="${w}" height="${h}" rx="1.5" fill="${fill}" stroke="rgba(0,0,0,0.3)"/>`);
+    // Draws plates outwards from x, each as `piece` says.
+    const stack = (plates, piece) => plates.forEach((p, k) => {
+      const [, h, w] = PLATE_STYLE[state.unit][p];
+      parts.push(piece(p, k, dir < 0 ? x - w : x, w, h));
       x += dir * (w + 2);
     });
-    parts.push(`<rect class="bar-plate" style="--k:${plates.length};--from:${dir * 40}px" x="${dir < 0 ? x - 5 : x}" y="${mid - 11}" width="5" height="22" rx="1" fill="var(--chrome)"/>`);
+    const collar = (fill, extra) => rect(dir < 0 ? x - 5 : x, 5, 22, fill, extra);
+    if (lit) {
+      stack(lift.plates, (p, k, px, w, h) => rect(px, w, h, shine));
+      parts.push(collar(shine));
+      return parts.join('');
+    }
+    stack(keep, (p, k, px, w, h) => rect(px, w, h, plateFill(p), rim(p)));
+    const fork = x;
+    stack(off, (p, k, px, w, h) => rect(px, w, h, plateFill(p), `${flyOff(lift.offAt(k))} ${rim(p)}`));
+    if (lift.unlock !== undefined) parts.push(collar('var(--chrome)', flyOff(lift.unlock)));
+    x = fork;
+    stack(on, (p, k, px, w, h) => rect(px, w, h, plateFill(p), `${flyOn(k)} ${rim(p)}`));
+    parts.push(collar('var(--chrome)', flyOn(on.length)));
     return parts.join('');
   };
-  return `<svg class="bar-svg" viewBox="0 0 ${W} ${H}" aria-hidden="true">
-    <rect x="0" y="${mid - 4.5}" width="${sleeve}" height="9" rx="2" fill="url(#bar-steel)"/>
-    <rect x="${sleeve + shaft}" y="${mid - 4.5}" width="${sleeve}" height="9" rx="2" fill="url(#bar-steel)"/>
-    <rect x="${sleeve}" y="${mid - 3.5}" width="${shaft}" height="7" fill="url(#bar-steel)"/>
-    <rect x="${sleeve + 10}" y="${mid - 3.5}" width="${shaft * 0.3}" height="7" fill="rgba(0,0,0,0.18)"/>
-    <rect x="${sleeve + shaft * 0.7 - 10}" y="${mid - 3.5}" width="${shaft * 0.3}" height="7" fill="rgba(0,0,0,0.18)"/>
-    ${side(-1)}${side(1)}
+  const specks = burst ? [...DUST, ...DUST.map(([dx, dy, r]) => [dx * 1.9, dy * 1.7, r * 0.9])] : DUST;
+  const dust = (dir) => {
+    const ox = (dir < 0 ? sleeve : sleeve + shaft) + dir * stackWidth(lift.plates);
+    return specks.map(([dx, dy, r]) => `<circle class="show-dust" style="--d:${lift.lock}ms;--dx:${dir * dx}px;--dy:${dy}px" cx="${ox}" cy="${mid}" r="${r}" fill="var(--chalk)"/>`).join('');
+  };
+  // The shine is a band of light that runShow sends across the bar once everything is on.
+  return `<svg class="show-bar" viewBox="0 0 ${W} ${H}" aria-hidden="true">
+    <defs>
+      <linearGradient id="gleam-${i}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="80" y2="0" gradientTransform="translate(-90 0)">
+        <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+        <stop offset="0.5" stop-color="#fff" stop-opacity="0.6"/>
+        <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+        <animateTransform class="show-gleam" attributeName="gradientTransform" type="translate" from="-90 0" to="${W + 10} 0" dur="0.8s" begin="indefinite" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines="0.45 0 0.55 1"/>
+      </linearGradient>
+    </defs>
+    <g class="show-scene" style="--d:${lift.t0 - 80}ms">${behind}</g>
+    <g class="show-rig" style="--d:${lift.t0}ms">${body('url(#bar-steel)')}${knurl}${side(-1)}${side(1)}</g>
+    <g>${body(shine)}${side(-1, true)}${side(1, true)}</g>
+    <g class="show-scene" style="--d:${lift.t0 - 80}ms">${front}</g>
+    ${dust(-1)}${dust(1)}
   </svg>`;
 }
 
-// The three records, each loaded on a bar, and the total they add up to.
+// The page: the total, then the three records on their bars, and not a word. It fills the screen; runShow, called
+// once it's drawn, runs the show planned here.
+let show = null;
 function prsView() {
   const records = LIFTS.map((l) => ({ l, r: liftRecord(state, l.id) })).filter(({ r }) => r);
-  const stacks = records.map(({ r }) => platesPerSide(r.value, state.unit));
-  const sleeve = Math.max(100, ...stacks.map((p) => stackWidth(p) + 18));
-  const totals = totalHistory(state);
-  const now = totals[totals.length - 1];
-  const first = totals[0];
-  const bar = BAR[state.unit];
-  const rows = records.map(({ l, r }, i) => {
-    const plates = stacks[i];
-    const made = tidy(bar + 2 * plates.reduce((sum, p) => sum + p, 0));
-    let caption = plates.length ? `${plates.map(fmt).join(' + ')} each side` : 'The empty bar';
-    if (r.value < bar) caption = 'Lighter than the empty bar';
-    else if (made !== r.value) caption += `. Plates make ${fmt(made)}`;
-    return `<li class="pr">
-      <div class="pr-head">
-        <h2 class="pr-lift">${l.name}</h2>
-        <span class="pr-date">${r.kind === 'remax' ? 'Re-max, ' : ''}${shortDate(r.date)}</span>
-      </div>
-      <p class="pr-num">${fmt(r.value)}<span class="pr-unit">${state.unit}</span></p>
-      ${loadedBar(plates, sleeve)}
-      <p class="pr-plates">${caption}</p>
-      ${r.previous ? `<p class="pr-gain">Up ${fmt(r.value - r.previous.value)} from ${fmt(r.previous.value)} on ${shortDate(r.previous.date)}</p>` : ''}
+  const plan = showPlan(records.map(({ r }) => r.value), state.unit);
+  const sleeve = Math.max(100, ...plan.lifts.map((lift) => stackWidth(lift.plates) + 18));
+  const total = tidy(records.reduce((sum, { r }) => sum + r.value, 0));
+  show = plan;
+  if (!records.length) return '<section class="show"></section>';
+  // Each bar is drawn twice: as itself, and upside down in the floor under it (minus its gradient, whose id must
+  // stay unique; the copy shines off the original).
+  const rows = records.map(({ l }, i) => {
+    const bar = showBar(plan.lifts[i], l.id, i, sleeve);
+    return `<li class="show-lift">
+      <p class="show-num" style="--d:${plan.lifts[i].landed - 140}ms"><span class="show-digits">${big(plan.lifts[i].value)}</span></p>
+      <div class="show-stage" style="aspect-ratio:${SHAFT + 2 * sleeve} / 100">${bar}<div class="show-reflect">${bar.replace(/<defs>[\s\S]*?<\/defs>/, '')}</div></div>
     </li>`;
   }).join('');
-  const rise = first && first.date !== now.date ? ` Up ${fmt(now.total - first.total)} from your first total of ${big(first.total)} on ${shortDate(first.date)}.` : '';
-  return `<header class="top"><h1 class="display">PRs</h1></header>
-    ${now ? `<section class="total" aria-label="Total">
-      <p class="total-num">${big(now.total)}<span class="total-unit">${state.unit} total</span></p>
-      <p class="hint">Your best squat, bench and deadlift added up, reached ${shortDate(now.date)}.${rise}</p>
-    </section>` : ''}
-    <ol class="pr-list">${rows}</ol>
-    <p class="hint">A record is a lift you did: the maxes you entered when you started, maxes added in History → Lifts, and good re-max attempts. Estimates from 2+ sets don't count.</p>`;
+  return `<section class="show" aria-label="Records">
+    <p class="show-total" style="--d:${plan.lifts[0].landed - 140}ms;--fin:${plan.finale}ms"><span class="show-digits">${big(total)}</span></p>
+    <ol class="show-list">${rows}</ol>
+  </section>`;
+}
+
+// Changes what a number reads, which also knocks its digits up a notch (the tick restarts every time).
+function setDigits(p, text) {
+  const digits = p.firstElementChild;
+  if (digits.textContent === text) return;
+  digits.textContent = text;
+  digits.classList.remove('is-tick');
+  void digits.offsetWidth;
+  digits.classList.add('is-tick');
+}
+
+// Steps each number up as its plates touch down, and the total with them, then sets off the finale. The clock starts
+// when the page is drawn, the same moment the bars' CSS delays count from. The page is drawn with the records on it,
+// which is what stays when motion is turned down.
+function runShow() {
+  const plan = show;
+  const nums = [...view.querySelectorAll('.show-num')];
+  const totalEl = view.querySelector('.show-total');
+  if (!plan || !nums.length || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const t0 = performance.now();
+  const frame = () => {
+    if (!nums[0].isConnected) return;
+    const t = performance.now() - t0;
+    let sum = 0;
+    plan.lifts.forEach((lift, i) => {
+      const step = stepAt(lift.steps, t);
+      setDigits(nums[i], big((step || lift.steps[0]).value));
+      if (step) sum += step.value;
+      if (step === lift.steps[lift.steps.length - 1]) nums[i].classList.add('is-set');
+    });
+    setDigits(totalEl, big(tidy(sum)));
+    if (t < plan.finale) {
+      requestAnimationFrame(frame);
+      return;
+    }
+    totalEl.classList.add('is-set');
+    for (const gleam of view.querySelectorAll('.show-gleam')) gleam.beginElement?.();
+  };
+  frame();
+}
+
+// ---------- The PR moment ----------
+// A good re-max lift heavier than any record on the PRs page: the screen goes dark, three white lights come on, and
+// the old record's bar is made into the new one (see prShow in show.js). A tap anywhere closes it.
+
+function openMoment(lift, old, value) {
+  const plan = prShow(old, value, state.unit);
+  const sleeve = Math.max(100, stackWidth(plan.plates) + 18, stackWidth([...plan.keep, ...plan.off]) + 18);
+  const bar = showBar(plan, lift.id, 'pr', sleeve, true);
+  moment.firstElementChild.innerHTML = `
+    <div class="moment-lights" style="--lock:${plan.lock}ms">${plan.lightsAt.map((d) => `<i class="moment-light" style="--d:${d}ms"></i>`).join('')}</div>
+    <div class="moment-lift">
+      <p class="show-num moment-num" style="--d:${plan.landed - 140}ms"><span class="show-digits">${big(old)}</span></p>
+      <div class="show-stage moment-stage" style="aspect-ratio:${SHAFT + 2 * sleeve} / 100">
+        <i class="moment-burst" style="--d:${plan.lock}ms"></i><i class="moment-ring" style="--d:${plan.lock}ms"></i>
+        ${bar}<div class="show-reflect">${bar.replace(/<defs>[\s\S]*?<\/defs>/, '')}</div>
+      </div>
+      <p class="moment-gain" style="--d:${plan.gainAt}ms">+${big(tidy(value - old))}</p>
+    </div>`;
+  moment.showModal();
+  runMoment(plan);
+}
+
+// Knocks the group down a touch, as a pair of plates lands.
+function thump(el) {
+  el.classList.remove('is-thump');
+  void el.offsetWidth;
+  el.classList.add('is-thump');
+}
+
+// Steps the number as the plates change over, pops it when the collars lock, then sends the shine over the bar.
+// With motion turned down the moment is drawn finished.
+function runMoment(plan) {
+  const num = moment.querySelector('.moment-num');
+  const group = moment.querySelector('.moment-lift');
+  const last = plan.steps[plan.steps.length - 1];
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    setDigits(num, big(plan.value));
+    num.classList.add('is-live', 'is-set');
+    return;
+  }
+  const t0 = performance.now();
+  let shown = plan.steps[0];
+  const frame = () => {
+    if (!moment.open) return;
+    const t = performance.now() - t0;
+    const step = stepAt(plan.steps, t);
+    if (step && step !== shown) {
+      shown = step;
+      num.classList.toggle('is-live', !step.old);
+      setDigits(num, big(step.value));
+      thump(group);
+    }
+    if (step === last) num.classList.add('is-set');
+    if (t < plan.finale) {
+      requestAnimationFrame(frame);
+      return;
+    }
+    for (const gleam of moment.querySelectorAll('.show-gleam')) gleam.beginElement?.();
+  };
+  frame();
 }
 
 // Logged sets light up like meet judging lights: white for a good set, red for a short one.
@@ -1293,28 +1466,39 @@ function settingsView() {
 }
 
 const shortDay = (d) => d.slice(0, 3);
+const listDays = (days) => (days.length > 1 ? `${days.slice(0, -1).join(', ')} and ${days[days.length - 1]}` : days.join(''));
 
+// The exercises by kind of day (bench days, squat days, deadlift day), each day's in the order it does them.
 function exercisesSection() {
-  const last = state.exercises.length - 1;
-  const rows = state.exercises.map((e, i) => {
-    const days = e.days.length ? e.days.map(shortDay).join(', ') : 'No set days';
-    const partner = exerciseById(e.link) ?? state.exercises.find((x) => x.link === e.id);
-    const variants = `${e.variants.length ? `. ${e.variants.map(esc).join(' or ')}` : ''}${partner ? `. Superset with ${esc(partner.name)}` : ''}`;
-    return `<li class="exercise-row">
-      <button class="index-row" data-action="exercise-edit" data-exercise="${e.id}" data-key="exercise-edit-${e.id}">${picHTML(e)}<span class="index-text">
-        <span class="index-name">${esc(e.name)}</span>
-        <span class="index-meta">${e.sets} × ${e.low}–${e.high}, ${days}${e.muscle ? `. ${e.muscle}` : ''}${isCounted(e) ? '. In plates a side' : ''}${variants}</span>
-      </span></button>
-      <button class="icon-btn" data-action="exercise-move" data-exercise="${e.id}" data-by="-1" data-key="exercise-up-${e.id}"
-        aria-label="Move ${esc(e.name)} up"${i === 0 ? ' disabled' : ''}>↑</button>
-      <button class="icon-btn" data-action="exercise-move" data-exercise="${e.id}" data-by="1" data-key="exercise-down-${e.id}"
-        aria-label="Move ${esc(e.name)} down"${i === last ? ' disabled' : ''}>↓</button>
-    </li>`;
+  const groups = exercisesByDay(state).map((k) => {
+    const key = k.lift ?? 'none';
+    const lift = LIFTS.find((l) => l.id === k.lift);
+    const ownDays = (e) => e.days.length === k.days.length && e.days.every((d) => k.days.includes(d));
+    const last = k.exercises.length - 1;
+    const rows = k.exercises.map((e, i) => {
+      // The days show only when they aren't just the kind's own: one of them, or another kind's day too.
+      const days = ownDays(e) ? '' : `, ${e.days.map(shortDay).join(', ')}`;
+      const partner = exerciseById(e.link) ?? state.exercises.find((x) => x.link === e.id);
+      const variants = `${e.variants.length ? `. ${e.variants.map(esc).join(' or ')}` : ''}${partner ? `. Superset with ${esc(partner.name)}` : ''}`;
+      return `<li class="exercise-row">
+        <button class="index-row" data-action="exercise-edit" data-exercise="${e.id}" data-key="exercise-edit-${key}-${e.id}">${picHTML(e)}<span class="index-text">
+          <span class="index-name">${esc(e.name)}</span>
+          <span class="index-meta">${e.sets} × ${e.low}–${e.high}${days}${e.muscle ? `. ${e.muscle}` : ''}${isCounted(e) ? '. In plates a side' : ''}${variants}</span>
+        </span></button>
+        <button class="icon-btn" data-action="exercise-move" data-exercise="${e.id}" data-kind="${key}" data-by="-1" data-key="exercise-up-${key}-${e.id}"
+          aria-label="Move ${esc(e.name)} up"${i === 0 ? ' disabled' : ''}>↑</button>
+        <button class="icon-btn" data-action="exercise-move" data-exercise="${e.id}" data-kind="${key}" data-by="1" data-key="exercise-down-${key}-${e.id}"
+          aria-label="Move ${esc(e.name)} down"${i === last ? ' disabled' : ''}>↓</button>
+      </li>`;
+    }).join('');
+    return `<h3 class="index-group"><span>${lift ? `${lift.short} day${k.days.length > 1 ? 's' : ''}` : 'No set days'}</span>
+        <span class="index-group-days">${lift ? listDays(k.days) : 'Only when added to a day'}</span></h3>
+      ${rows ? `<ol class="index-list">${rows}</ol>` : '<p class="hint">None yet.</p>'}`;
   }).join('');
   return `<section class="setting">
     <h2 class="setting-title">Accessories</h2>
-    <p class="hint">Your exercises, the days they show up on, and their rep ranges. They're listed under each day's main lift in this order.</p>
-    ${rows ? `<ol class="index-list">${rows}</ol>` : ''}
+    <p class="hint">Your exercises by the days they show up on, with their rep ranges. Each day lists them under its main lift in this order; the arrows move one within its days.</p>
+    <div class="index-groups">${groups}</div>
     <button class="btn" data-action="exercise-new">Add an exercise</button>
     <p class="hint credit">Exercise drawings from <a href="https://github.com/AlexMollard/Open-Exercise-Art" target="_blank" rel="noopener">Open Exercise Art</a> by Alex Mollard, <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>, with their lines thickened.</p>
   </section>`;
@@ -1957,10 +2141,18 @@ const ACTIONS = {
       return;
     }
     const session = sessionAt(ui.sheet.index);
-    logSet(session, ui.sheet.set, Number(el.dataset.reps));
+    const reps = Number(el.dataset.reps);
+    // The record going in, to see whether a good re-max lift beats it. Only a re-max single can; a lift already
+    // counted (judged good before) is in the record going in, so re-judging it never sets the moment off again.
+    const record = session.kind === 'max' ? liftRecord(state, session.lift) : null;
+    logSet(session, ui.sheet.set, reps);
     repsSheet.close();
     render();
     if (isTestSet(session, ui.week, ui.sheet.set)) toast(testNews(session));
+    else if (record && reps === 1) {
+      const now = liftRecord(state, session.lift);
+      if (now.value > record.value) openMoment(liftOf(session), record.value, now.value);
+    }
   },
   'reps-clear'() {
     if (ui.sheet.exercise) logExtra(ui.sheet.index, exerciseById(ui.sheet.exercise), ui.sheet.set, null);
@@ -1970,6 +2162,9 @@ const ACTIONS = {
   },
   'sheet-close'(el) {
     el.closest('dialog').close();
+  },
+  'moment-close'() {
+    moment.close();
   },
   weight(el) {
     openWeight(Number(el.dataset.index), el.dataset.attempt === undefined ? undefined : Number(el.dataset.attempt));
@@ -2112,10 +2307,9 @@ const ACTIONS = {
     openEditor(el.dataset.exercise);
   },
   'exercise-move'(el) {
-    const i = state.exercises.findIndex((e) => e.id === el.dataset.exercise);
-    const j = i + Number(el.dataset.by);
-    if (j < 0 || j >= state.exercises.length) return;
-    [state.exercises[i], state.exercises[j]] = [state.exercises[j], state.exercises[i]];
+    const e = exerciseById(el.dataset.exercise);
+    const kind = exercisesByDay(state).find((k) => (k.lift ?? 'none') === el.dataset.kind);
+    if (!e || !kind || !moveExercise(state, e, Number(el.dataset.by), kind.exercises)) return;
     save();
     render();
   },

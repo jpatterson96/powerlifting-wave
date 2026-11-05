@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { press, typed, nudge } from '../pad.js';
+import { DECIMALS, press, typed, nudge } from '../pad.js';
 
 const type = (keys, text = '', options) => keys.split('').reduce((t, k) => press(t, k, options), text);
 
@@ -27,9 +27,10 @@ test('a fresh number is replaced by what is typed and cleared by backspace', () 
   assert.equal(press('120', 'back', { fresh: true }), '');
 });
 
-test('plates a side take no decimals', () => {
-  assert.equal(press('6', '.', { decimals: false }), '6');
-  assert.equal(type('6.5', '', { decimals: false }), '65');
+test('plates a side take one decimal, for the small plates', () => {
+  assert.equal(type('2.5', '', { decimals: DECIMALS.plates }), '2.5');
+  assert.equal(type('2.55', '', { decimals: DECIMALS.plates }), '2.5');
+  assert.equal(press('6', '.', { decimals: 0 }), '6');
 });
 
 test('the number stops at four whole digits and two decimals', () => {

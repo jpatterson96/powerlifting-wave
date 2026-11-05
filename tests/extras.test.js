@@ -4,7 +4,7 @@ import { newBlock, emptyState, convertState, upgrade, isValidState, estimateMax 
 import {
   newExercise, dayExtras, dayGroups, setLink, supersetOrder, ensureEntry, entryOf, exerciseHistory, lastTime,
   defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras, finishExtras, plannedSets, isNewBest, muscleSets,
-  isCounted, loadOf, workoutTime, timedSessions, exercisesByDay, moveExercise,
+  isCounted, countedPlates, weightOf, loadOf, workoutTime, timedSessions, exercisesByDay, moveExercise,
 } from '../extras.js';
 
 const MAX = { squat: 385, bench: 315, deadlift: 455 };
@@ -217,6 +217,28 @@ test('an exercise counted in plates a side logs plates, makes weight for volume,
   const clean = cleanExtras(saved);
   assert.equal(clean.exercises[0].counted, true);
   assert.equal('counted' in clean.exercises[1], false);
+});
+
+test('plates a side are typed to a tenth: whole 45s, then .5 for a 25 and .1 for each 10', () => {
+  assert.deepEqual(countedPlates(2.5, 'lb'), [45, 45, 25]);
+  assert.deepEqual(countedPlates(2.1, 'lb'), [45, 45, 10]);
+  assert.deepEqual(countedPlates(2.2, 'lb'), [45, 45, 10, 10]);
+  assert.deepEqual(countedPlates(2.7, 'lb'), [45, 45, 25, 10, 10]);
+  assert.deepEqual(countedPlates(0.5, 'lb'), [25]);
+  assert.deepEqual(countedPlates(3, 'lb'), [45, 45, 45]);
+  assert.deepEqual(countedPlates(2.5, 'kg'), [20, 20, 10]);
+  assert.deepEqual(countedPlates(0, 'lb'), []);
+  const row = { counted: true, step: 0.5, sets: 3, low: 6, high: 10 };
+  assert.equal(weightOf(row, 3.5, 'lb'), 160);
+  assert.equal(loadOf(row, 2.5, 'lb'), 230);
+  assert.equal(weightOf({}, 2.5, 'lb'), 2.5);
+  // 2.3 (45 + 45 + 30) is heavier than 2.5 (45 + 45 + 25), so estimates and records go by weight.
+  const sets = [{ weight: 2.5, reps: 8 }, { weight: 2.3, reps: 8 }];
+  assert.equal(sessionBest(sets, row, 'lb').value, estimateMax(120, 8));
+  const r = records([{ sets }], row, 'lb');
+  assert.equal(r.heaviest.weight, 2.3);
+  assert.equal(r.volume, 8 * 230 + 8 * 240);
+  assert.deepEqual(suggestion(row, { sets: [{ weight: 2.5, reps: 10 }, { weight: 2.3, reps: 10 }, { weight: 2.3, reps: 10 }] }).weights, [2.8, 2.8, 2.8]);
 });
 
 test('a timed day runs from start to end, each set counted toward the exercise it ended', () => {

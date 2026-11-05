@@ -26,12 +26,27 @@ export const LOADS = {
   ez: { name: 'EZ bar', bar: { lb: 25, kg: 10 } },
   machine: { name: 'plate-loaded machine', bar: { lb: 0, kg: 0 } },
 };
-// An exercise counted in plates (`counted`) is logged as the number of plates on each side, not a weight.
+// An exercise counted in plates (`counted`) is logged as the plates on each side, not a weight. The whole
+// number is big plates and the tenth is small ones on top: .5 is a half plate and each .1 a small one, so
+// in lb 2.5 is 45 + 45 + 25, 2.2 is 45 + 45 + 10 + 10 and 2.7 is 45 + 45 + 25 + 10 + 10.
 // It's a field of its own so older versions of the app pass it through untouched.
 export const PLATE = { lb: 45, kg: 20 };
+export const SMALL_PLATES = { lb: { half: 25, tenth: 10 }, kg: { half: 10, tenth: 5 } };
 export const isCounted = (exercise) => exercise?.counted === true;
-// The weight a logged number stands for, for volume: plates a side are counted as full plates, both sides.
-export const loadOf = (exercise, weight, unit) => (isCounted(exercise) ? weight * 2 * PLATE[unit] : weight);
+
+// The plates on one side for a count, heaviest first.
+export function countedPlates(count, unit) {
+  const tenths = Math.round(count * 10);
+  const small = tenths % 10;
+  const { half, tenth } = SMALL_PLATES[unit];
+  return [...Array(Math.floor(tenths / 10)).fill(PLATE[unit]), ...(small >= 5 ? [half] : []), ...Array(small % 5).fill(tenth)];
+}
+
+// What a logged number weighs, to compare and estimate with: one side's plates for an exercise counted in
+// plates (the count alone doesn't order, as 2.3 is heavier than 2.5), else the weight.
+export const weightOf = (exercise, weight, unit) => (isCounted(exercise) ? countedPlates(weight, unit).reduce((a, p) => a + p, 0) : weight);
+// The weight a logged number stands for, for volume: plates a side count on both sides.
+export const loadOf = (exercise, weight, unit) => (isCounted(exercise) ? 2 * weightOf(exercise, weight, unit) : weight);
 
 // Weeks 7 and 8 (the taper, then the re-max or deload) cut accessories to half the sets at the same
 // weights and reps, so the main lifts are fresh. They're never "last time" for progressing afterwards.
@@ -175,11 +190,13 @@ export function lastTime(state, id, variant, here, full = false) {
 export function isNewBest(state, id, variant, here, sets) {
   const earlier = exerciseHistory(state, id).filter((h) => h.variant === variant && before(h.at, here));
   if (!earlier.length || !sets.length) return false;
-  const today = sessionBest(sets);
+  const exercise = state.exercises.find((e) => e.id === id);
+  const best = (list) => sessionBest(list, exercise, state.unit);
+  const today = best(sets);
   return earlier.every((h) => {
-    const was = sessionBest(h.sets);
+    const was = best(h.sets);
     return was.kind !== today.kind || today.value > was.value;
-  }) && earlier.some((h) => sessionBest(h.sets).kind === today.kind);
+  }) && earlier.some((h) => best(h.sets).kind === today.kind);
 }
 
 // The variant to show when nothing is logged yet today: whatever was used last, else the first.
@@ -192,7 +209,7 @@ export function defaultVariant(state, exercise) {
 // Double progression: keep the weight and add a rep per set until every set reaches the top of the range,
 // then add a step of weight and start again from the bottom. Body-weight work (logged as 0) just keeps
 // adding reps. In a lighter week it's fewer sets, repeating last time.
-export function suggestion(exercise, last, week = 0) {
+export function suggestion(exercise, last, week = 0, unit = 'lb') {
   const n = plannedSets(exercise, week);
   const light = isLightWeek(week);
   if (!last) return { weights: Array(n).fill(null), reps: Array(n).fill(exercise.low), up: false };
@@ -200,7 +217,8 @@ export function suggestion(exercise, last, week = 0) {
   const loaded = sets.some((s) => s.weight > 0);
   const up = !light && loaded && sets.length >= exercise.sets && sets.every((s) => s.reps >= exercise.high);
   if (up) {
-    const weight = tidy(Math.max(...sets.map((s) => s.weight)) + exercise.step);
+    const heaviest = sets.reduce((a, s) => (weightOf(exercise, s.weight, unit) > weightOf(exercise, a.weight, unit) ? s : a));
+    const weight = tidy(heaviest.weight + exercise.step);
     return { weights: Array(n).fill(weight), reps: Array(n).fill(exercise.low), up };
   }
   const at = (i) => sets[Math.min(i, sets.length - 1)];
@@ -212,27 +230,30 @@ export function suggestion(exercise, last, week = 0) {
   };
 }
 
-// The best of one session: estimated max for loaded sets, or most reps when it's all body weight.
-export function sessionBest(sets) {
+// The best of one session: estimated max for loaded sets, or most reps when it's all body weight. For an
+// exercise counted in plates, the estimate is of one side's weight.
+export function sessionBest(sets, exercise = null, unit = 'lb') {
   const loaded = sets.filter((s) => s.weight > 0 && s.reps > 0);
   if (!loaded.length) return { value: Math.max(0, ...sets.map((s) => s.reps)), kind: 'reps' };
-  return { value: Math.max(...loaded.map((s) => estimateMax(s.weight, s.reps))), kind: 'estimate' };
+  return { value: Math.max(...loaded.map((s) => estimateMax(weightOf(exercise, s.weight, unit), s.reps))), kind: 'estimate' };
 }
 
-// Personal records for one variant: heaviest set, best estimated max, and the session with the most volume.
-export function records(history) {
+// Personal records for one variant: heaviest set, best estimated max (of one side's weight for plates a
+// side), and the session with the most volume, in weight.
+export function records(history, exercise = null, unit = 'lb') {
+  const weigh = (w) => weightOf(exercise, w, unit);
   let heaviest = null;
   let best = null;
   let volume = 0;
   for (const h of history) {
     for (const s of h.sets) {
-      if (!heaviest || s.weight > heaviest.weight || (s.weight === heaviest.weight && s.reps > heaviest.reps)) heaviest = s;
+      if (!heaviest || weigh(s.weight) > weigh(heaviest.weight) || (s.weight === heaviest.weight && s.reps > heaviest.reps)) heaviest = s;
       if (s.weight > 0 && s.reps > 0) {
-        const e = estimateMax(s.weight, s.reps);
+        const e = estimateMax(weigh(s.weight), s.reps);
         if (!best || e > best.value) best = { value: e, ...s };
       }
     }
-    volume = Math.max(volume, h.sets.reduce((sum, s) => sum + s.weight * s.reps, 0));
+    volume = Math.max(volume, h.sets.reduce((sum, s) => sum + loadOf(exercise, s.weight, unit) * s.reps, 0));
   }
   return { heaviest, best, volume: tidy(volume) };
 }

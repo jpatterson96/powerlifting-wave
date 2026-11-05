@@ -2037,8 +2037,17 @@ legend.setting-title + * {
 
 .rep-grid[hidden],
 .pad[hidden],
-.sheet-weight[hidden] {
+.sheet-weight[hidden],
+.load-note[hidden] {
   display: none;
+}
+
+/* Plates a side, as the typed count puts them on: "45 + 45 + 25 = 115 lb a side". */
+.load-note {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The number on its dashed blank, with a step down and up beside it. A tap on the blank brings the keys up. */

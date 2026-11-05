@@ -1,5 +1,5 @@
 // Bump the version whenever any file changes so phones pick up the new copy.
-const CACHE = 'wave-v16';
+const CACHE = 'wave-v17';
 const FILES = [
   './',
   'index.html',

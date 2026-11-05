@@ -4,13 +4,14 @@
 
 import { tidy } from './logic.js';
 
-// Four whole digits is more than anyone loads; two decimals cover 1.25 plates.
+// Four whole digits is more than anyone loads; two decimals cover 1.25 kg plates.
 const MAX_WHOLE = 4;
-const MAX_DECIMALS = 2;
+export const DECIMALS = { weight: 2, plates: 1 };
 
 // `key` is a digit, '.' or 'back'. A `fresh` number is the one the sheet opened with, shown as if
-// selected: typing replaces it and backspace clears it. `decimals` is off for weights counted in plates.
-export function press(text, key, { fresh = false, decimals = true } = {}) {
+// selected: typing replaces it and backspace clears it. `decimals` is how many digits may follow the
+// point: one for plates a side, whose tenth is the small plates (2.5 is 45 + 45 + 25).
+export function press(text, key, { fresh = false, decimals = DECIMALS.weight } = {}) {
   const base = fresh ? '' : text;
   if (key === 'back') return base.slice(0, -1);
   if (key === '.') {
@@ -20,7 +21,7 @@ export function press(text, key, { fresh = false, decimals = true } = {}) {
   if (!/^[0-9]$/.test(key)) return base;
   if (base === '0') return key;
   const [whole, fraction] = base.split('.');
-  const room = fraction === undefined ? whole.length < MAX_WHOLE : fraction.length < MAX_DECIMALS;
+  const room = fraction === undefined ? whole.length < MAX_WHOLE : fraction.length < decimals;
   return room ? base + key : base;
 }
 

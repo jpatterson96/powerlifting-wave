@@ -120,9 +120,12 @@ of day (bench days, squat days, deadlift day) and sets each one's days, sets, re
   the last full week.
 - An exercise loaded with plates (barbell, 45 lb / 20 kg; EZ bar, 25 lb / 10 kg; or a plate-loaded
   machine, plates only) shows the plates per side for its next set.
-- An exercise **counted in plates a side** (a leg press, hack squat or the like) is logged as the number
-  of 45 lb / 20 kg plates on each side instead of a weight. Its weight jump is in plates, and volume
-  counts every plate on both sides.
+- An exercise **counted in plates a side** (a leg press, hack squat, plate-loaded row or the like) is
+  logged as the plates on each side instead of a weight. The whole number is 45s (20s in kg) and the
+  tenth is the small plates on top: .5 is a 25 (10 kg) and each .1 a 10 (5 kg), so 2.5 is 45 + 45 + 25,
+  2.2 is 45 + 45 + 10 + 10 and 2.7 is 45 + 45 + 25 + 10 + 10. The set sheet spells out the plates as you
+  type. Its weight jump is in plates, estimates are of one side's weight, and volume counts every plate
+  on both sides at what it weighs.
 - Each exercise names the muscle it counts toward, for the weekly set count in History.
 - Each exercise shows a line drawing beside its name, picked from the name (and the variant in use);
   the editor's **Picture** row lets you choose another. The drawings are from

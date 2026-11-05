@@ -6,12 +6,12 @@ import {
   maxChanges, liftRecord, convertState, upgrade,
 } from './logic.js';
 import {
-  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, isCounted, loadOf, isLightWeek, plannedSets, newExercise,
+  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, SMALL_PLATES, isCounted, countedPlates, weightOf, loadOf, isLightWeek, plannedSets, newExercise,
   dayExtras, dayGroups, exercisesByDay, moveExercise, setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, lastTime, isNewBest, defaultVariant,
   suggestion, sessionBest, records, muscleSets, workoutTime, timedSessions, logBodyweight, cleanExtras,
 } from './extras.js';
 import { mergeLogs } from './merge.js';
-import { press, typed, nudge } from './pad.js';
+import { DECIMALS, press, typed, nudge } from './pad.js';
 import { PICS, picFor, picFile } from './pics.js';
 import { showPlan, prShow, stepAt } from './show.js';
 import * as sync from './sync.js';
@@ -98,8 +98,20 @@ const fmtLoad = (w) => (w === 0 ? 'BW' : fmt(w));
 // An accessory's load as it's logged: plates a side for one counted in plates, else the weight (BW for 0).
 const loadText = (e, w) => (isCounted(e) ? `${fmt(w)} ${w === 1 ? 'plate' : 'plates'}` : fmtLoad(w));
 const loadUnit = (e) => (isCounted(e) ? 'plates a side' : state.unit);
-// An estimated max in the exercise's own terms: a whole weight, or plates to a tenth.
-const estText = (e, v) => (isCounted(e) ? `${fmt(Math.round(v * 10) / 10)} plates` : fmt(Math.round(v)));
+// An estimated max in the exercise's own terms: a whole weight, or for plates a side, one side's weight.
+const estText = (e, v) => (isCounted(e) ? `${fmt(Math.round(v))} ${state.unit} a side` : fmt(Math.round(v)));
+// One side's plates for a count, as they go on: "45 + 45 + 25", with a long run of one plate as "6 × 45".
+function platesText(count) {
+  const runs = [];
+  for (const plate of countedPlates(count, state.unit)) {
+    const run = runs[runs.length - 1];
+    if (run?.plate === plate) run.n += 1;
+    else runs.push({ plate, n: 1 });
+  }
+  return runs.flatMap(({ plate, n }) => (n > 3 ? [`${n} × ${fmt(plate)}`] : Array(n).fill(fmt(plate)))).join(' + ');
+}
+// How plates a side are typed: "45s, then .5 for a 25 and .1 for each 10".
+const countRule = () => `${PLATE[state.unit]}s, then .5 for a ${SMALL_PLATES[state.unit].half} and .1 for each ${SMALL_PLATES[state.unit].tenth}`;
 const exerciseById = (id) => state.exercises.find((e) => e.id === id);
 // The picture beside an accessory, a mask that takes the text colour. With nothing to show, an empty slot keeps rows lined up.
 function picHTML(e, variant = null, cls = '') {
@@ -509,7 +521,7 @@ function extraPlan(session, index, exercise) {
   const entry = entryOf(session, exercise.id);
   const variant = entry?.variant ?? defaultVariant(state, exercise);
   const last = lastTime(state, exercise.id, variant, here(index), true);
-  return { entry, variant, last, plan: suggestion(exercise, last, ui.week) };
+  return { entry, variant, last, plan: suggestion(exercise, last, ui.week, state.unit) };
 }
 
 // The day's record for an exercise, made with the week's number of sets the first time it's needed.
@@ -611,7 +623,10 @@ const lightWeekName = () => (ui.week === FINISH_WEEK ? (block().finish === 'rema
 // counted in plates, the weight those plates make.
 function plateNote(e, weight) {
   if (weight === null || !(weight > 0)) return '';
-  if (isCounted(e)) return `${loadText(e, weight)} a side is ${fmt(loadOf(e, weight, state.unit))} ${state.unit} in all, counting each plate as ${PLATE[state.unit]}.`;
+  if (isCounted(e)) {
+    const side = weightOf(e, weight, state.unit);
+    return `${loadText(e, weight)} a side: ${platesText(weight)}. That's ${fmt(side)} ${state.unit} a side, ${fmt(2 * side)} in all.`;
+  }
   const load = LOADS[e.plates];
   const bar = load.bar[state.unit];
   if (weight < bar) return `${fmt(weight)} is lighter than the empty ${load.name}.`;
@@ -643,7 +658,7 @@ function daySummary(b, session, i) {
   const volume = [...main, ...done.flatMap((x) => x.sets.map((s) => ({ weight: loadOf(x.e, s.weight, state.unit), reps: s.reps })))]
     .reduce((sum, x) => sum + x.weight * x.reps, 0);
   const bests = done.filter((x) => isNewBest(state, x.e.id, x.entry.variant, here(i), x.sets)).map((x) => {
-    const top = sessionBest(x.sets);
+    const top = sessionBest(x.sets, x.e, state.unit);
     return `${esc(x.e.name)}${x.entry.variant ? ` (${esc(x.entry.variant)})` : ''}, ${top.kind === 'reps' ? plural(top.value, 'rep') : `est. max ${estText(x.e, top.value)}`}`;
   });
   return `<section class="day-summary" aria-label="Workout summary">
@@ -717,7 +732,7 @@ function extraDetail(session, i, e, named) {
       : plan.up ? `${range}. Last time ${setsText(last.sets, e)}: every set at the top, so go up to ${loadText(e, plan.weights[0])}.`
         : `${range}. Last time ${setsText(last.sets, e)}: same ${isCounted(e) ? 'plates' : 'weight'}, one more rep a set.`;
   const next = Array.from({ length: count }, (_, k) => k).find((k) => !entry?.sets[k]);
-  const plates = e.plates && next !== undefined ? plateNote(e, extraTarget(e, entry, plan, next).weight) : '';
+  const plates = (e.plates || isCounted(e)) && next !== undefined ? plateNote(e, extraTarget(e, entry, plan, next).weight) : '';
   const chip = e.variants.length > 1
     ? `<button class="chip" data-action="extra-variant" ${ids} data-key="extra-variant-${i}-${e.id}" aria-label="${esc(e.name)} variant: ${esc(variant)}. Change">${esc(variant)}</button>`
     : e.variants.length ? `<span class="chip is-static">${esc(variant)}</span>` : '';
@@ -1234,7 +1249,7 @@ function extrasHistory() {
   const rows = state.exercises.map((e) => {
     const h = exerciseHistory(state, e.id);
     const last = h[h.length - 1];
-    const best = records(h).best;
+    const best = records(h, e, state.unit).best;
     const meta = last
       ? `Last ${last.date ? shortDate(last.date) : 'logged'}: ${setsText(last.sets, e)}${best ? `. Est. max ${estText(e, best.value)}` : ''}`
       : 'Not logged yet';
@@ -1255,9 +1270,9 @@ function exerciseDetail(e) {
   if (!history.length) return `${back}${title}<p class="chart-empty">Not logged yet. It fills in after the first session.</p>`;
   const variants = used.length > 1
     ? `<fieldset class="variant-pick" aria-label="Variant">${segmented('variant', used.map((v) => ({ value: v ?? '', label: v ?? 'Other' })), ui.variant ?? '')}</fieldset>` : '';
-  const { heaviest, best, volume } = records(history);
+  const { heaviest, best, volume } = records(history, e, state.unit);
   const points = history.map((h, i) => {
-    const top = sessionBest(h.sets);
+    const top = sessionBest(h.sets, e, state.unit);
     const date = h.date ? shortDate(h.date) : `Session ${i + 1}`;
     return { value: Math.round(top.value * 10) / 10, label: date, title: date, note: top.kind === 'reps' ? 'reps, best set' : `est. max, from ${setsText(h.sets, e)}` };
   });
@@ -1271,11 +1286,11 @@ function exerciseDetail(e) {
     <dl class="stats">
       <div><dt>Heaviest set</dt><dd>${loadText(e, heaviest.weight)} × ${heaviest.reps}</dd></div>
       ${best ? `<div><dt>Estimated max</dt><dd>${estText(e, best.value)}</dd></div>` : ''}
-      <div><dt>Best session</dt><dd>${Math.round(loadOf(e, volume, state.unit)).toLocaleString()}</dd></div>
+      <div><dt>Best session</dt><dd>${Math.round(volume).toLocaleString()}</dd></div>
     </dl>
-    <p class="hint">Best session is weight × reps added up, in ${state.unit}.${isCounted(e) ? ` Each plate counts as ${PLATE[state.unit]} ${state.unit}, both sides.` : ''}</p>
+    <p class="hint">Best session is weight × reps added up, in ${state.unit}.${isCounted(e) ? ' Plates count at what they weigh, on both sides.' : ''}</p>
     <section class="chart-block">
-      <h3 class="chart-title">${reps ? 'Most reps in a set' : `Estimated max${isCounted(e) ? ' in plates' : ''}, by session`}</h3>
+      <h3 class="chart-title">${reps ? 'Most reps in a set' : `Estimated max${isCounted(e) ? `, ${state.unit} a side` : ''}, by session`}</h3>
       ${points.length > 1 ? chartFigure('progress', `${esc(e.name)} by session`, progressChart(points, chartWidth()))
         : '<p class="chart-empty">Log it again to see a chart.</p>'}
     </section>
@@ -1634,9 +1649,11 @@ function buildPads() {
 // Sets the keypad up for a sheet. `value` is the weight it opens with (null for none), shown as if selected:
 // typing replaces it. `text` is what's been typed, kept as typed so "12." shows that way. `open` is whether
 // the keys are showing: always in the weight sheet, in place of the reps in the set sheet. `step` is what
-// the − and + keys move by; `decimals` is off for weights counted in plates a side.
-function startPad(host, value, { step, decimals = true, unit = state.unit, open = true }) {
-  ui.pad = { host, text: value === null ? '' : fmt(value), fresh: value !== null, step, decimals, unit, open };
+// the − and + keys move by; `plates` is for an accessory counted in plates a side, typed to a tenth (2.5 is
+// 45 + 45 + 25), with the plates it makes shown under it.
+function startPad(host, value, { step, plates = false, unit = state.unit, open = true }) {
+  const decimals = plates ? DECIMALS.plates : DECIMALS.weight;
+  ui.pad = { host, text: value === null ? '' : fmt(value), fresh: value !== null, step, decimals, plates, unit, open };
 }
 
 const padSheet = () => (ui.pad.host === 'reps' ? repsSheet : weightSheet);
@@ -1661,6 +1678,11 @@ function renderPad() {
   }
   sheet.querySelector('.pad').hidden = !p.open;
   sheet.querySelector('.pad-point').disabled = !p.decimals;
+  const note = sheet.querySelector('.load-note');
+  if (note) {
+    note.hidden = !(p.plates && value > 0);
+    note.textContent = note.hidden ? '' : `${platesText(value)} = ${fmt(countedPlates(value, state.unit).reduce((a, b) => a + b, 0))} ${state.unit} a side`;
+  }
   if (p.host === 'reps') repGrid.hidden = p.open;
 }
 
@@ -1704,12 +1726,12 @@ function openExtra(index, id, set) {
   ui.sheet = { index, set, exercise: id };
   document.getElementById('reps-title').textContent = `${e.name}${variant ? `, ${variant}` : ''}, set ${set + 1}`;
   document.getElementById('reps-note').textContent = isCounted(e)
-    ? `${e.low}–${e.high} reps. Count the ${PLATE[state.unit]} ${state.unit} plates on one side, then tap the reps you did.`
+    ? `${e.low}–${e.high} reps. Count the plates on one side: ${countRule()}. Then tap the reps you did.`
     : `${e.low}–${e.high} reps. Set the weight (0 for body weight), then tap the reps you did.`;
   document.getElementById('reps-weight-field').hidden = false;
   const weight = current?.weight ?? target.weight ?? entry?.sets.filter(Boolean).pop()?.weight ?? null;
   // With no weight to go on, the keys come up first; otherwise the reps do, and a tap on the weight brings them up.
-  startPad('reps', weight, { step: e.step, decimals: !isCounted(e), unit: loadUnit(e), open: weight === null });
+  startPad('reps', weight, { step: e.step, plates: isCounted(e), unit: loadUnit(e), open: weight === null });
   repGrid.classList.remove('is-judging');
   repGrid.innerHTML = Array.from({ length: e.high + 6 }, (_, n) => `
     <button class="rep${n === target.reps ? ' is-target' : ''}" data-action="reps-pick" data-reps="${n}"
@@ -1813,7 +1835,7 @@ function openEditor(id, index = null) {
     .map((m) => `<option value="${m}"${m === e?.muscle ? ' selected' : ''}>${m}</option>`).join('')}`;
   const loadLabel = (l) => (l.bar[state.unit] ? `${l.name[0].toUpperCase()}${l.name.slice(1)}, ${fmt(l.bar[state.unit])} ${state.unit}` : 'Plate-loaded machine, by weight');
   const loads = [['', 'None: dumbbells, cables or a stack'], ...Object.entries(LOADS).map(([k, l]) => [k, loadLabel(l)]),
-    ['count', `Counted in plates a side, ${PLATE[state.unit]} ${state.unit} each`]];
+    ['count', `Counted in plates a side (2.5 = ${platesText(2.5)})`]];
   const load = isCounted(e) ? 'count' : e?.plates ?? '';
   document.getElementById('exercise-plates').innerHTML = loads
     .map(([k, label]) => `<option value="${k}"${k === load ? ' selected' : ''}>${label}</option>`).join('');

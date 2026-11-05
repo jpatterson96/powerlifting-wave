@@ -71,7 +71,7 @@ export const PLATES = {
 export const ROUNDING = { lb: [5, 2.5], kg: [2.5, 5] };
 export const REST_MODES = ['sound', 'silent', 'off'];
 
-const LB_PER_KG = 2.20462;
+export const LB_PER_KG = 2.20462;
 
 // Avoids float noise like 334.99999 in displayed numbers.
 export function tidy(n) {
@@ -110,7 +110,7 @@ export function adjustMax(max, estimate, liftId, state) {
 }
 
 // The logged test set of one lift in an amrap week, or null.
-function testResult(block, liftId, week, state) {
+export function testResult(block, liftId, week, state) {
   const s = block.log[week].find((x) => x.lift === liftId && x.kind === 'base');
   const last = s && !s.skipped ? s.reps[s.reps.length - 1] : null;
   if (last === null || last === undefined) return null;

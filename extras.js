@@ -48,6 +48,20 @@ export const weightOf = (exercise, weight, unit) => (isCounted(exercise) ? count
 // The weight a logged number stands for, for volume: plates a side count on both sides.
 export const loadOf = (exercise, weight, unit) => (isCounted(exercise) ? 2 * weightOf(exercise, weight, unit) : weight);
 
+// The lifter loads nothing of 10 lb or less, so a number that small is plates a side typed as a count
+// (3 is 45 + 45 + 45, 2.5 is 45 + 45 + 25), never a weight; 0 stays body weight. Only in lb: in kg, 2.5 and
+// 7.5 are everyday weights.
+export const PLATES_UP_TO = 10;
+export const looksCounted = (state, exercise, weight) =>
+  !isCounted(exercise) && state.unit === 'lb' && typeof weight === 'number' && weight > 0 && weight <= PLATES_UP_TO;
+
+// Switches an exercise to plates a side. Logged numbers stay as they are, so switching back in the editor
+// reads them as weights again. Someone typing counts uses the small plates, so it goes up half a plate at a time.
+export const GUESSED_STEP = 0.5;
+export function countInPlates(exercise) {
+  Object.assign(exercise, { counted: true, plates: null, step: GUESSED_STEP });
+}
+
 // Weeks 7 and 8 (the taper, then the re-max or deload) cut accessories to half the sets at the same
 // weights and reps, so the main lifts are fresh. They're never "last time" for progressing afterwards.
 export const isLightWeek = (week) => week >= FINISH_WEEK - 1;
@@ -381,7 +395,9 @@ const validMax = (n) => typeof n === 'number' && n > 0 && n < 5000;
 // Drops anything malformed in the optional data (accessories, body weight, earlier maxes, the days maxes
 // were set, and workout times) instead of rejecting the whole log, and fills in the fields older logs don't have.
 export function cleanExtras(state) {
-  state.exercises = Array.isArray(state.exercises) ? state.exercises.map(cleanChoices).filter(validExercise) : [];
+  // The DOTS formula for History → Stats (stats.js DOTS): men's or women's, else none picked yet.
+  if (state.dots !== undefined && !['men', 'women'].includes(state.dots)) delete state.dots;
+  state.exercises =Array.isArray(state.exercises) ? state.exercises.map(cleanChoices).filter(validExercise) : [];
   state.bodyweight = Array.isArray(state.bodyweight)
     ? state.bodyweight.filter((e) => e && isDate(e.date) && typeof e.weight === 'number' && e.weight > 0) : [];
   if (state.imported !== undefined) {

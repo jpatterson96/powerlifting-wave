@@ -1891,17 +1891,32 @@ legend.setting-title + * {
   color: var(--chalk);
 }
 
+/* One scroll in a sheet: the body, held to the screen's height. A scroll that runs off its end stops there
+   instead of moving the page behind, which stays put until the sheet closes. */
+.sheet[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+html:has(.sheet[open]) {
+  overflow: hidden;
+}
+
 .sheet::backdrop {
   background: rgba(6, 12, 18, 0.6);
 }
 
 .sheet-body {
+  width: 100%;
   max-width: 560px;
   margin: 0 auto;
   padding: 22px 20px calc(env(safe-area-inset-bottom) + 18px);
   border-top: 1px solid var(--line);
   border-radius: 18px 18px 0 0;
   background: var(--surface);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .sheet[open] .sheet-body {
@@ -1937,11 +1952,6 @@ legend.setting-title + * {
   border-radius: 12px;
   background: var(--bg);
   font: 700 28px/1 var(--display);
-}
-
-.sheet-body {
-  max-height: 100dvh;
-  overflow-y: auto;
 }
 
 .sheet-weight {
@@ -2989,4 +2999,357 @@ main.is-show {
   .moment-ring {
     display: none;
   }
+}
+
+/* ---------- History → Stats ---------- */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The section's one big number, in the PRs page's brushed-steel digits. */
+.stat-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.stat-hero .show-digits {
+  font: 800 76px/0.9 var(--display);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-hero-label {
+  color: var(--muted);
+  font: 700 22px/1 var(--display);
+  letter-spacing: 0.04em;
+}
+
+.dots-pick {
+  margin-top: 4px;
+}
+
+.dots-pick legend {
+  padding: 0;
+}
+
+.dots-pick .seg {
+  margin-top: 10px;
+}
+
+/* Each record as a multiple of body weight. */
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stat-tile {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+}
+
+.stat-tile-label,
+.stat-tile-meta {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.stat-tile-num {
+  font: 800 28px/1 var(--display);
+  font-variant-numeric: tabular-nums;
+}
+
+/* How fast each record climbs: the rate, then its line over the years. */
+.gain-list,
+.check-list {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gain-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 96px;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 12px 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.gain-name,
+.check-name {
+  font: 700 22px/1.1 var(--display);
+}
+
+.gain-num {
+  font: 700 26px/1 var(--display);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.gain-unit {
+  color: var(--muted);
+  font: 600 14px var(--text);
+}
+
+.gain-meta {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.spark {
+  display: block;
+  width: 96px;
+  height: 34px;
+}
+
+.spark-line,
+.spark-recent {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.spark-line {
+  stroke: var(--steel);
+}
+
+.spark-recent {
+  stroke: var(--series-1);
+}
+
+.spark-dot {
+  fill: var(--chalk);
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+
+/* Is the max right: test-set estimates against the max, with the band where it holds. */
+.check-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 0 12px;
+  padding: 12px 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.check-max {
+  font: 700 22px/1 var(--display);
+  font-variant-numeric: tabular-nums;
+}
+
+.check-track {
+  position: relative;
+  grid-column: 1 / -1;
+  height: 10px;
+  margin-top: 14px;
+  border-radius: 5px;
+  background: var(--line);
+}
+
+.check-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--steel);
+  opacity: 0.55;
+}
+
+.check-dot {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--steel);
+  transform: translate(-50%, -50%);
+}
+
+.check-dot.is-latest {
+  width: 16px;
+  height: 16px;
+  background: var(--chalk);
+}
+
+.check-zones {
+  position: relative;
+  grid-column: 1 / -1;
+  height: 18px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.check-zones span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.check-said,
+.check-next {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+  font-size: 15px;
+}
+
+.check-next {
+  color: var(--muted);
+}
+
+/* What each count of reps on the next test set does to the max. */
+/* A ruler of rep counts, one column each, with the change under it. */
+.band-list {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  grid-column: 1 / -1;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.band {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 8px 2px 7px;
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.band strong {
+  font: 700 20px/1 var(--display);
+}
+
+.band.is-lower span {
+  color: var(--red-text);
+}
+
+.band.is-hold span {
+  color: var(--muted);
+}
+
+.band.is-raise span {
+  color: var(--gain);
+}
+
+/* Showing up: this block's days, a row per weekday and a column per week. */
+.day-grid {
+  width: 100%;
+  margin-top: 18px;
+  border-collapse: separate;
+  border-spacing: 0 6px;
+  table-layout: fixed;
+}
+
+.day-grid th {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.day-grid tbody th {
+  width: 40px;
+  text-align: left;
+}
+
+.day-grid thead th:first-child {
+  width: 40px;
+}
+
+.day-grid td {
+  height: 30px;
+  text-align: center;
+}
+
+.day-grid .day-rate {
+  width: 48px;
+  color: var(--chalk);
+  font: 700 17px/1 var(--display);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.day-grid thead .day-rate {
+  color: var(--muted);
+  font: 600 13px var(--text);
+}
+
+.day-cell {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid var(--line);
+  border-radius: 6px;
+  vertical-align: middle;
+}
+
+.day-cell.is-trained {
+  border-color: var(--chalk);
+  background: var(--chalk);
+}
+
+/* A slash through a skipped day, so it reads without colour. */
+.day-cell.is-skipped {
+  border-color: var(--steel);
+  background: linear-gradient(to top right, transparent calc(50% - 1px), var(--muted) calc(50% - 1px), var(--muted) calc(50% + 1px), transparent calc(50% + 1px));
+}
+
+.day-cell.is-next {
+  border: 2px dashed var(--chalk);
+}
+
+.day-legend .day-cell {
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  border-radius: 4px;
+}
+
+/* Accessories going up or stuck: the Accessories list's rows, with the change at the end. */
+.stat-sub {
+  margin-top: 22px;
+  font: 700 20px/1 var(--display);
+}
+
+.stat-sub + .index-list {
+  margin-top: 6px;
+}
+
+.stat-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.stat-row-num {
+  color: var(--gain);
+  font: 700 22px/1 var(--display);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-compare {
+  margin-top: 18px;
 }

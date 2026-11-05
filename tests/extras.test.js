@@ -4,7 +4,7 @@ import { newBlock, emptyState, convertState, upgrade, isValidState, estimateMax 
 import {
   newExercise, dayExtras, dayGroups, setLink, supersetOrder, ensureEntry, entryOf, exerciseHistory, lastTime,
   defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras, finishExtras, plannedSets, isNewBest, muscleSets,
-  isCounted, countedPlates, weightOf, loadOf, workoutTime, timedSessions, exercisesByDay, moveExercise,
+  isCounted, countedPlates, weightOf, loadOf, looksCounted, countInPlates, workoutTime, timedSessions, exercisesByDay, moveExercise,
 } from '../extras.js';
 
 const MAX = { squat: 385, bench: 315, deadlift: 455 };
@@ -239,6 +239,22 @@ test('plates a side are typed to a tenth: whole 45s, then .5 for a 25 and .1 for
   assert.equal(r.heaviest.weight, 2.3);
   assert.equal(r.volume, 8 * 230 + 8 * 240);
   assert.deepEqual(suggestion(row, { sets: [{ weight: 2.5, reps: 10 }, { weight: 2.3, reps: 10 }, { weight: 2.3, reps: 10 }] }).weights, [2.8, 2.8, 2.8]);
+});
+
+test('anything from just over 0 to 10 lb reads as plates a side; 0 is body weight', () => {
+  const { state, row } = setup();
+  assert.equal(looksCounted(state, row, 2.5), true);
+  assert.equal(looksCounted(state, row, 3), true);
+  assert.equal(looksCounted(state, row, 10), true);
+  assert.equal(looksCounted(state, row, 0.5), true);
+  assert.equal(looksCounted(state, row, 10.5), false);
+  assert.equal(looksCounted(state, row, 17.5), false); // a dumbbell
+  assert.equal(looksCounted(state, row, 0), false);
+  assert.equal(looksCounted(state, row, null), false);
+  assert.equal(looksCounted({ ...state, unit: 'kg' }, row, 2.5), false);
+  countInPlates(row);
+  assert.deepEqual([row.counted, row.plates, row.step], [true, null, 0.5]);
+  assert.equal(looksCounted(state, row, 2.5), false); // already counted
 });
 
 test('a timed day runs from start to end, each set counted toward the exercise it ended', () => {

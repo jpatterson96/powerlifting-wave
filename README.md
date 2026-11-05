@@ -125,7 +125,10 @@ of day (bench days, squat days, deadlift day) and sets each one's days, sets, re
   tenth is the small plates on top: .5 is a 25 (10 kg) and each .1 a 10 (5 kg), so 2.5 is 45 + 45 + 25,
   2.2 is 45 + 45 + 10 + 10 and 2.7 is 45 + 45 + 25 + 10 + 10. The set sheet spells out the plates as you
   type. Its weight jump is in plates, estimates are of one side's weight, and volume counts every plate
-  on both sides at what it weighs.
+  on both sides at what it weighs. Nothing here is lifted at 10 lb or less, so typing a number from just
+  over 0 to 10 (3, or 2.5) for any other exercise switches it to plates a side, going up half a plate at
+  a time: a decimal as you type it, a whole number once it's done. 0 stays body weight, and switching
+  back in the editor reads the logged numbers as weights again.
 - Each exercise names the muscle it counts toward, for the weekly set count in History.
 - Each exercise shows a line drawing beside its name, picked from the name (and the variant in use);
   the editor's **Picture** row lets you choose another. The drawings are from
@@ -168,6 +171,22 @@ reads the new record, and the collars lock with a flash and a cloud of chalk. Th
 Tap anywhere to get back to your day. Only a single on a re-max day can set it off, never a "2+" set.
 
 ## History
+
+**Stats** opens first, with the log as a whole:
+
+- **Strength for your size**: the total of your records (as on the PRs page) against your latest body
+  weight, as a multiple of it, each lift's too, and as a DOTS score, the one meets use to compare lifters
+  of different body weights. DOTS has a men's and a women's formula; pick one there or in Settings.
+- **How fast you're gaining**: each lift's record per year, from the first one on file to today, how much
+  it rose in the last 12 months, and its record line over the years.
+- **Is your max right?**: where each 2+ test set's estimate landed against the max that week trained
+  from (93–99% holds it), and for the next test set, what each count of reps does to the max.
+- **Showing up**: this block's days as a grid of weekdays by weeks, trained, skipped and to come; days
+  trained in a row since the last skip; and the share of each weekday trained over every block.
+- **Accessories moving and stuck**: the biggest gains in estimated max since each was first logged, and
+  any with no more weight or reps in 3 sessions (weeks 7 and 8 left out). Tap one for its chart.
+- **Everything you've lifted**: weight × reps of every work set and accessory set, with days, sets, reps
+  and time trained, and this block against the last, a day at a time.
 
 **Lifts**: pick a lift to see two charts that share one week-by-week axis across every block:
 

@@ -6,7 +6,7 @@ import {
   maxChanges, liftRecord, convertState, upgrade,
 } from './logic.js';
 import {
-  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, SMALL_PLATES, isCounted, countedPlates, weightOf, loadOf, isLightWeek, plannedSets, newExercise,
+  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, SMALL_PLATES, isCounted, countedPlates, weightOf, loadOf, PLATES_UP_TO, GUESSED_STEP, looksCounted, countInPlates, isLightWeek, plannedSets, newExercise,
   dayExtras, dayGroups, exercisesByDay, moveExercise, setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, lastTime, isNewBest, defaultVariant,
   suggestion, sessionBest, records, muscleSets, workoutTime, timedSessions, logBodyweight, cleanExtras,
 } from './extras.js';
@@ -16,7 +16,8 @@ import { PICS, picFor, picFile } from './pics.js';
 import { showPlan, prShow, stepAt } from './show.js';
 import * as sync from './sync.js';
 import * as rest from './rest.js';
-import { maxChart, volumeChart, progressChart } from './charts.js';
+import { maxChart, volumeChart, progressChart, sparkline } from './charts.js';
+import { DOTS, STUCK_AFTER, strength, gains, maxChecks, nextTest, consistency, totals, accessoryTrends } from './stats.js';
 
 const KEY = 'powerlifting-wave';
 const view = document.getElementById('view');
@@ -39,7 +40,7 @@ let state = load();
 // `past` the earlier max being changed, by its place in state.pastMaxes (null for a new one).
 const ui = {
   tab: 'train', reviewing: false, week: null, open: undefined, sheet: null, lift: 'squat',
-  history: 'lifts', exercise: null, variant: null, editing: null, past: null, muscleWeek: null,
+  history: 'stats', exercise: null, variant: null, editing: null, past: null, muscleWeek: null,
   // The accessory (or superset) opened on the shown day, by its first exercise's id; undefined picks one under way.
   extraOpen: undefined,
   // The weight being typed on the app's keypad in a sheet; see startPad.
@@ -97,7 +98,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const fmtLoad = (w) => (w === 0 ? 'BW' : fmt(w));
 // An accessory's load as it's logged: plates a side for one counted in plates, else the weight (BW for 0).
 const loadText = (e, w) => (isCounted(e) ? `${fmt(w)} ${w === 1 ? 'plate' : 'plates'}` : fmtLoad(w));
-const loadUnit = (e) => (isCounted(e) ? 'plates a side' : state.unit);
+const loadUnit = (plates) => (plates ? 'plates a side' : state.unit);
 // An estimated max in the exercise's own terms: a whole weight, or for plates a side, one side's weight.
 const estText = (e, v) => (isCounted(e) ? `${fmt(Math.round(v))} ${state.unit} a side` : fmt(Math.round(v)));
 // One side's plates for a count, as they go on: "45 + 45 + 25", with a long run of one plate as "6 × 45".
@@ -1119,15 +1120,225 @@ function chartWidth() {
 }
 
 const HISTORY_VIEWS = [
-  { value: 'lifts', label: 'Lifts' }, { value: 'extras', label: 'Accessories' }, { value: 'muscles', label: 'Muscles' }, { value: 'time', label: 'Time' },
+  { value: 'stats', label: 'Stats' }, { value: 'lifts', label: 'Lifts' }, { value: 'extras', label: 'Accessories' }, { value: 'muscles', label: 'Muscles' }, { value: 'time', label: 'Time' },
   { value: 'body', label: 'Body' },
 ];
 
 function historyView() {
-  const section = { extras: extrasHistory, muscles: musclesHistory, time: timeHistory, body: bodyHistory }[ui.history]?.() ?? liftsHistory();
+  const section = { stats: statsHistory, extras: extrasHistory, muscles: musclesHistory, time: timeHistory, body: bodyHistory }[ui.history]?.() ?? liftsHistory();
   return `<header class="top"><h1 class="display">History</h1></header>
     <fieldset class="history-pick" aria-label="Show">${segmented('historyView', HISTORY_VIEWS, ui.history)}</fieldset>
     ${section}`;
+}
+
+// ---------- Stats ----------
+
+const DOTS_OPTIONS = [{ value: 'men', label: "Men's" }, { value: 'women', label: "Women's" }];
+const pct = (r) => `${Math.round(r * 100)}%`;
+const signed = (n) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${fmt(Math.abs(n))}`;
+// Long spans read in hours alone: "51 min", "6 h 40 min", "41 h".
+const hoursText = (ms) => (ms < 10 * 3600000 ? spanText(ms) : `${Math.round(ms / 3600000)} h`);
+
+// History → Stats: the log as a whole, from strength for body weight to everything lifted.
+function statsHistory() {
+  return [strengthStats(), gainStats(), maxStats(), showingUp(), accessoryStats(), totalStats()].join('');
+}
+
+// The records total against body weight, and as a DOTS score once a formula is picked.
+function strengthStats() {
+  const s = strength(state);
+  if (!s) return '';
+  const title = '<h2 class="chart-title">Strength for your size</h2>';
+  if (!s.body) {
+    return `<section class="chart-block">${title}
+      <p class="chart-empty">Log your body weight to see your total against it, and your DOTS score.</p>
+      <button class="btn-quiet past-add" data-action="history-view" data-view="body">Log body weight</button>
+    </section>`;
+  }
+  const hero = s.score === null
+    ? `<fieldset class="dots-pick"><legend class="hint">Your DOTS score, the one meets use to compare lifters of every size, has a men's and a women's formula. Score with:</legend>${segmented('dots', DOTS_OPTIONS, null)}</fieldset>`
+    : `<p class="stat-hero"><span class="show-digits">${s.score.toFixed(1)}</span><span class="stat-hero-label">DOTS</span></p>`;
+  const tiles = s.lifts.map((l) => `<li class="stat-tile">
+      <span class="stat-tile-label">${LIFTS.find((x) => x.id === l.lift).short}</span>
+      <span class="stat-tile-num">${l.ratio.toFixed(2)}×</span>
+      <span class="stat-tile-meta">${fmt(l.value)}</span>
+    </li>`).join('');
+  const per = s.score === null ? ''
+    : ` Each ${s.step} ${state.unit} on the total adds ${s.perTotal.toFixed(1)} points; the same total at ${s.step} ${state.unit} lighter adds ${s.perBody.toFixed(1)}.`;
+  return `<section class="chart-block">${title}
+    ${hero}
+    <dl class="stats">
+      <div><dt>Total</dt><dd>${big(s.total)}</dd></div>
+      <div><dt>Body weight</dt><dd>${fmt(s.body.weight)}</dd></div>
+      <div><dt>Times body weight</dt><dd>${s.ratio.toFixed(2)}×</dd></div>
+    </dl>
+    <ul class="stat-tiles" aria-label="Each record as a multiple of body weight">${tiles}</ul>
+    <p class="hint">Your records, as on the PRs page, against your body weight on ${shortDate(s.body.date)}.${per}</p>
+  </section>`;
+}
+
+// How fast each lift's record climbs, with its record line drawn on a time scale the three share.
+function gainStats() {
+  const today = todayISO();
+  const rows = LIFTS.map((l) => ({ l, g: gains(state, l.id, today) })).filter((r) => r.g);
+  if (!rows.length) return '';
+  const from = rows.map((r) => r.g.first.date).sort()[0];
+  const list = rows.map(({ l, g }) => {
+    const year = g.lastYear === null ? '' : g.lastYear > 0 ? ` Up ${fmt(g.lastYear)} in the last 12 months.` : ' Nothing new in the last 12 months.';
+    const meta = g.steps.length > 1
+      ? `${fmt(g.first.value)} on ${shortDate(g.first.date)} to ${fmt(g.best.value)} on ${shortDate(g.best.date)}.${year}`
+      : `${fmt(g.best.value)} on ${shortDate(g.best.date)}, your only record so far.`;
+    return `<li class="gain-row">
+      <span class="gain-name">${l.short}</span>
+      <span class="gain-num">${g.perYear === null ? '–' : `+${fmt(Math.round(g.perYear))}<span class="gain-unit"> ${state.unit} a year</span>`}</span>
+      ${g.steps.length > 1 ? sparkline(g.steps, from, today) : '<span class="spark"></span>'}
+      <span class="gain-meta">${meta}</span>
+    </li>`;
+  }).join('');
+  return `<section class="chart-block">
+    <h2 class="chart-title">How fast you're gaining</h2>
+    <ul class="gain-list">${list}</ul>
+    <p class="hint">Each lift's record from the first on file to today, so a long wait for the next one slows the rate. The blue end of each line is the last 12 months. Earlier maxes added under Lifts reach further back.</p>
+  </section>`;
+}
+
+// Where each test set's estimate landed against the max, on a scale from 86% to 110% of it.
+const CHECK_SCALE = [0.86, 1.1];
+const checkAt = (r) => {
+  const [lo, hi] = CHECK_SCALE;
+  return `${((Math.min(hi, Math.max(lo, r)) - lo) / (hi - lo)) * 100}%`;
+};
+
+// Whether each lift's max matches its test sets, and what the reps on the next one would say.
+function maxStats() {
+  const b = block();
+  let tested = 0;
+  const rows = LIFTS.map((l) => {
+    const checks = maxChecks(state, l.id);
+    tested += checks.length;
+    const latest = checks[checks.length - 1];
+    const next = nextTest(state, l.id);
+    const track = checks.length ? `<span class="check-track" aria-hidden="true">
+        <span class="check-band" style="left:${checkAt(0.93)};width:calc(${checkAt(0.99)} - ${checkAt(0.93)})"></span>
+        ${checks.map((c, i) => `<i class="check-dot${i === checks.length - 1 ? ' is-latest' : ''}" style="left:${checkAt(c.ratio)}"></i>`).join('')}
+      </span>
+      <span class="check-zones" aria-hidden="true"><span style="left:${checkAt(0.895)}">Lower</span><span style="left:${checkAt(0.96)}">Hold</span><span style="left:${checkAt(1.045)}">Raise</span></span>` : '';
+    const said = (c) => {
+      const what = c.week === FIRST_TEST
+        ? { raise: `raised ${fmt(c.by)} for weeks 4–8`, hold: 'held for weeks 4–8', lower: `lowered ${fmt(-c.by)} for weeks 4–8` }[c.change]
+        : { raise: 'you’re ahead of it', hold: 'about right', lower: 'it’s ahead of you' }[c.change];
+      return `Week ${c.week + 1}${state.blocks.length > 1 ? ` of block ${c.block + 1}` : ''}: ${fmt(c.weight)} × ${c.reps} estimates ${fmt(Math.round(c.estimate))}, ${pct(c.ratio)} of the ${fmt(c.max)} max: ${what}.`;
+    };
+    const band = (x) => `<li class="band is-${x.change}"><strong>${x.to === null ? `${x.from}+` : x.from === x.to ? x.from : `${x.from}–${x.to}`}</strong><span>${x.change === 'hold' ? 'hold' : signed(x.by)}</span></li>`;
+    const ahead = next && (next.week === FIRST_TEST ? 'Its reps move the max for weeks 4–8:' : b.finish === 'deload' ? "Its reps set next block's max:" : 'What its reps say about the max:');
+    return `<li class="check-row">
+      <span class="check-name">${l.short}</span><span class="check-max">${fmt(weekMax(b, l.id, currentWeek(b), state))}</span>
+      ${track}
+      ${latest ? `<p class="check-said">${said(latest)}</p>` : ''}
+      ${next ? `<p class="check-next">Week ${next.week + 1} test set, ${fmt(next.weight)} × ${WEEKS[next.week].base.reps}+. ${ahead}</p>
+        <ol class="band-list" aria-label="Reps on the test set, and the change to the max">${next.bands.map(band).join('')}</ol>` : ''}
+    </li>`;
+  }).join('');
+  return `<section class="chart-block">
+    <h2 class="chart-title">Is your max right?</h2>
+    <ul class="check-list">${rows}</ul>
+    <p class="hint">${tested
+    ? 'Each dot is a test set’s estimate against the max that week trained from, the latest in white. Between 93% and 99% the max holds.'
+    : 'Your 2+ sets in weeks 3 and 6 test the max. Until the first, here’s what the reps on each would do.'}</p>
+  </section>`;
+}
+
+const DAY_STATES = { trained: 'Trained', skipped: 'Skipped', next: 'Next', todo: 'To come' };
+
+// This block's days as a grid of weekdays by weeks, with each weekday's share trained over every block.
+function showingUp() {
+  const c = consistency(state);
+  const head = block().log.map((_, w) => `<th scope="col">${w + 1}</th>`).join('');
+  const rows = WEEKDAYS.map((day, d) => {
+    const cells = c.grid[d].map((st) => (st
+      ? `<td><i class="day-cell is-${st}" aria-hidden="true"></i><span class="sr-only">${DAY_STATES[st]}</span></td>` : '<td></td>')).join('');
+    const { trained, skipped } = c.byDay[d];
+    return `<tr><th scope="row">${shortDay(day)}</th>${cells}<td class="day-rate">${trained + skipped ? pct(trained / (trained + skipped)) : '–'}</td></tr>`;
+  }).join('');
+  const legend = Object.entries(DAY_STATES).map(([k, label]) => `<span><i class="day-cell is-${k}"></i>${label}</span>`).join('');
+  const slips = c.slips
+    ? `${c.slips.day}s slip the most: ${c.slips.skipped} of ${c.slips.trained + c.slips.skipped} skipped.`
+    : 'Nothing skipped yet.';
+  return `<section class="chart-block">
+    <h2 class="chart-title">Showing up</h2>
+    <dl class="stats">
+      <div><dt>Trained</dt><dd>${c.trained}</dd></div>
+      <div><dt>Skipped</dt><dd>${c.skipped}</dd></div>
+      <div><dt>In a row</dt><dd>${c.run}</dd></div>
+    </dl>
+    <table class="day-grid">
+      <caption class="sr-only">Block ${state.blocks.length}, each training day by week</caption>
+      <thead><tr><th scope="col"><span class="sr-only">Day</span></th>${head}<th scope="col" class="day-rate">All</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="chart-legend day-legend">${legend}</p>
+    <p class="hint">${slips} Trained and skipped count this block's days; in a row is days trained since the last one skipped. The weeks are block ${state.blocks.length}'s, and All is each weekday trained over every block.</p>
+  </section>`;
+}
+
+// Which accessories are going up since they were first logged, and which have stalled.
+function accessoryStats() {
+  const trends = accessoryTrends(state);
+  const title = '<h2 class="chart-title">Accessories moving and stuck</h2>';
+  if (!trends.length) {
+    return `<section class="chart-block">${title}
+      <p class="chart-empty">Shows once you've done an accessory twice: which ones are going up, and any that have stopped.</p>
+    </section>`;
+  }
+  const best = (t, v) => (v.kind === 'reps' ? plural(v.value, 'rep') : estText(t.exercise, v.value));
+  const row = (t, num, meta) => `<li><button class="index-row stat-row" data-action="exercise-open" data-exercise="${t.exercise.id}"${t.variant ? ` data-variant="${esc(t.variant)}"` : ''}>${picHTML(t.exercise, t.variant)}<span class="index-text">
+      <span class="index-name">${esc(t.exercise.name)}${t.variant ? ` (${esc(t.variant)})` : ''}</span><span class="index-meta">${meta}</span>
+    </span><span class="stat-row-num">${num}</span></button></li>`;
+  const up = trends.filter((t) => t.change > 0).sort((a, b) => b.change - a.change);
+  const stuck = trends.filter((t) => t.flat >= STUCK_AFTER).sort((a, b) => b.flat - a.flat);
+  const upRows = up.slice(0, 5).map((t) => row(t, `+${Math.round(t.change * 100)}%`,
+    `${t.first.kind === 'reps' ? 'Most reps' : 'Est. max'} ${best(t, t.first)} to ${best(t, t.last)}, over ${plural(t.sessions, 'session')}`)).join('');
+  const stuckRows = stuck.map((t) => row(t, '', `Level for ${t.flat} sessions. Last: ${setsText(t.latest.sets, t.exercise)}`)).join('');
+  return `<section class="chart-block">${title}
+    <p class="hint">${up.length} of ${trends.length} going up since you first logged them, each variant on its own.</p>
+    ${upRows ? `<h3 class="stat-sub">Going up</h3><ul class="index-list">${upRows}</ul>` : ''}
+    ${stuckRows ? `<h3 class="stat-sub">Stuck</h3><ul class="index-list">${stuckRows}</ul>
+      <p class="hint">Double progression adds a rep or some weight each session. After ${STUCK_AFTER} without either, drop the weight about 10% and build back up, or switch variants.</p>`
+    : `<p class="hint">Nothing stuck: each one added weight or reps in its last ${STUCK_AFTER - 1} sessions.</p>`}
+  </section>`;
+}
+
+// The odometer: everything lifted in all, and this block against the last a day at a time.
+function totalStats() {
+  const { all, blocks } = totals(state);
+  const n = (x) => Math.round(x).toLocaleString();
+  const perDay = (t, k) => (t.days ? t[k] / t.days : 0);
+  let compare = '';
+  if (blocks.length > 1) {
+    const [now, last] = blocks.slice(-2).reverse();
+    const row = (label, f) => `<tr><th scope="row"><span class="h-date">${label}</span></th><td>${f(now)}</td><td>${f(last)}</td></tr>`;
+    compare = `<table class="history weeks stat-compare">
+      <thead><tr><th scope="col"><span class="sr-only">Measure</span></th><th scope="col">This block</th><th scope="col">Last block</th></tr></thead>
+      <tbody>
+        ${row('Days trained', (t) => t.days)}
+        ${row(`${state.unit} a day`, (t) => n(perDay(t, 'volume')))}
+        ${row('Sets a day', (t) => fmt(Math.round(perDay(t, 'sets') * 10) / 10))}
+        ${row('Time a day', (t) => (t.timed ? spanText(t.ms / t.timed) : '–'))}
+      </tbody>
+    </table>`;
+  }
+  return `<section class="chart-block">
+    <h2 class="chart-title">Everything you've lifted</h2>
+    <p class="stat-hero"><span class="show-digits">${n(all.volume)}</span><span class="stat-hero-label">${state.unit}</span></p>
+    <dl class="stats">
+      <div><dt>Days</dt><dd>${n(all.days)}</dd></div>
+      <div><dt>Sets</dt><dd>${n(all.sets)}</dd></div>
+      <div><dt>Reps</dt><dd>${n(all.reps)}</dd></div>
+      <div><dt>Timed</dt><dd>${all.timed ? hoursText(all.ms) : '–'}</dd></div>
+    </dl>
+    ${compare}
+    <p class="hint">Weight × reps of every main-lift work set and accessory set (warm-ups aren't logged), with plates a side counted on both sides. Timed adds up the ${plural(all.timed, 'day')} timed from Start to End workout.${blocks.length > 1 ? '' : ' This block against the last shows once block 2 starts.'}</p>
+  </section>`;
 }
 
 // Hard sets per muscle in one week of the current block, against the 10–20 a week that's a common target
@@ -1451,6 +1662,11 @@ function settingsView() {
       ${segmented('rest', restOptions, state.rest)}
       <p class="hint">Starts when you log a set, timed for the lift and the weight: longer for heavier sets and deadlifts. The screen stays on while it runs, and the bar turns white when rest is over. Beeps only play with the app open and the ring switch off silent.</p>
     </fieldset>
+    <fieldset class="setting">
+      <legend class="setting-title">DOTS score</legend>
+      ${segmented('dots', DOTS_OPTIONS, state.dots ?? null)}
+      <p class="hint">The formula History → Stats scores your total with, to compare it across body weights.</p>
+    </fieldset>
     ${exercisesSection()}
     <section class="setting">
       <h2 class="setting-title">Current maxes</h2>
@@ -1650,10 +1866,30 @@ function buildPads() {
 // typing replaces it. `text` is what's been typed, kept as typed so "12." shows that way. `open` is whether
 // the keys are showing: always in the weight sheet, in place of the reps in the set sheet. `step` is what
 // the − and + keys move by; `plates` is for an accessory counted in plates a side, typed to a tenth (2.5 is
-// 45 + 45 + 25), with the plates it makes shown under it.
-function startPad(host, value, { step, plates = false, unit = state.unit, open = true }) {
-  const decimals = plates ? DECIMALS.plates : DECIMALS.weight;
-  ui.pad = { host, text: value === null ? '' : fmt(value), fresh: value !== null, step, decimals, plates, unit, open };
+// 45 + 45 + 25), with the plates it makes shown under it. `guess` is an accessory not counted in plates yet,
+// which typing a count can turn to plates a side.
+function startPad(host, value, { step, plates = false, guess = null, open = true }) {
+  ui.pad = { host, text: value === null ? '' : fmt(value), fresh: value !== null, guess, open };
+  padPlates(plates, step);
+}
+
+// Turns the keypad to or from plates a side: what the number reads as, how it's typed and what − and + move by.
+function padPlates(plates, step) {
+  Object.assign(ui.pad, { plates, decimals: plates ? DECIMALS.plates : DECIMALS.weight, unit: loadUnit(plates), step });
+}
+
+// A number of 10 lb or less typed for an accessory not yet counted in plates turns the keypad to plates a
+// side (2.5 is 45 + 45 + 25), and going over 10 turns it back. A whole number could still grow (the 1 of
+// 190), so it's judged once it's `final` (Done, or the reps tapped); a point fixes the whole part, so 2.5 is
+// judged as it's typed. Logging the set switches the exercise over.
+function guessPlates(final = false) {
+  const p = ui.pad;
+  const value = padValue();
+  if (!p.guess || value === null) return;
+  const plates = value > PLATES_UP_TO ? false : final || p.text.includes('.') ? looksCounted(state, p.guess, value) : p.plates;
+  if (plates === p.plates) return;
+  padPlates(plates, plates ? GUESSED_STEP : p.guess.step);
+  document.getElementById('reps-note').textContent = extraNote(p.guess, plates);
 }
 
 const padSheet = () => (ui.pad.host === 'reps' ? repsSheet : weightSheet);
@@ -1716,6 +1952,11 @@ function openReps(index, set) {
   repsSheet.showModal();
 }
 
+// The set sheet's note for an accessory: its rep range, and how to put in the weight or the plates.
+const extraNote = (e, plates) => (plates
+  ? `${e.low}–${e.high} reps. Count the plates on one side: ${countRule()}. Then tap the reps you did.`
+  : `${e.low}–${e.high} reps. Set the weight (0 for body weight), then tap the reps you did.`);
+
 // An accessory set: the weight (0 for body weight) and a tap on the reps done.
 function openExtra(index, id, set) {
   const session = sessionAt(index);
@@ -1725,13 +1966,13 @@ function openExtra(index, id, set) {
   const target = extraTarget(e, entry, plan, set);
   ui.sheet = { index, set, exercise: id };
   document.getElementById('reps-title').textContent = `${e.name}${variant ? `, ${variant}` : ''}, set ${set + 1}`;
-  document.getElementById('reps-note').textContent = isCounted(e)
-    ? `${e.low}–${e.high} reps. Count the plates on one side: ${countRule()}. Then tap the reps you did.`
-    : `${e.low}–${e.high} reps. Set the weight (0 for body weight), then tap the reps you did.`;
   document.getElementById('reps-weight-field').hidden = false;
   const weight = current?.weight ?? target.weight ?? entry?.sets.filter(Boolean).pop()?.weight ?? null;
+  // A count logged before the exercise was switched to plates (2.5) opens as plates a side.
+  const plates = isCounted(e) || looksCounted(state, e, weight);
+  document.getElementById('reps-note').textContent = extraNote(e, plates);
   // With no weight to go on, the keys come up first; otherwise the reps do, and a tap on the weight brings them up.
-  startPad('reps', weight, { step: e.step, plates: isCounted(e), unit: loadUnit(e), open: weight === null });
+  startPad('reps', weight, { step: plates && !isCounted(e) ? GUESSED_STEP : e.step, plates, guess: isCounted(e) ? null : e, open: weight === null });
   repGrid.classList.remove('is-judging');
   repGrid.innerHTML = Array.from({ length: e.high + 6 }, (_, n) => `
     <button class="rep${n === target.reps ? ' is-target' : ''}" data-action="reps-pick" data-reps="${n}"
@@ -2157,9 +2398,15 @@ const ACTIONS = {
         renderPad();
         return toast('Enter the weight first. Use 0 for body weight.');
       }
-      logExtra(ui.sheet.index, exerciseById(ui.sheet.exercise), ui.sheet.set, { weight, reps: Number(el.dataset.reps) });
+      const e = exerciseById(ui.sheet.exercise);
+      // A count typed for an exercise logged by weight (3, or 2.5) switches it to plates a side, for good.
+      guessPlates(true);
+      const switched = !isCounted(e) && ui.pad.plates;
+      if (switched) countInPlates(e);
+      logExtra(ui.sheet.index, e, ui.sheet.set, { weight, reps: Number(el.dataset.reps) });
       repsSheet.close();
       render();
+      if (switched) toast(`${e.name} is now counted in plates a side: ${fmt(weight)} is ${platesText(weight)}.`);
       return;
     }
     const session = sessionAt(ui.sheet.index);
@@ -2202,6 +2449,7 @@ const ACTIONS = {
   'pad-key'(el) {
     ui.pad.text = press(ui.pad.text, el.dataset.key, ui.pad);
     ui.pad.fresh = false;
+    guessPlates();
     renderPad();
   },
   // A step gives a whole number again, so typing after it starts over rather than adding digits to it.
@@ -2219,6 +2467,7 @@ const ACTIONS = {
     }
     if (v === null) return toast('Enter the weight first. Use 0 for body weight.');
     Object.assign(ui.pad, { text: fmt(v), fresh: true, open: false });
+    guessPlates(true);
     renderPad();
   },
   // One tap logs an accessory set as planned once its weight is known; otherwise it asks.
@@ -2362,8 +2611,14 @@ const ACTIONS = {
     pastSheet.close();
     render();
   },
+  // From the Accessories list, or from Stats with the variant to show.
   'exercise-open'(el) {
-    Object.assign(ui, { exercise: el.dataset.exercise, variant: null });
+    Object.assign(ui, { history: 'extras', exercise: el.dataset.exercise, variant: el.dataset.variant ?? null });
+    render();
+    scrollTop();
+  },
+  'history-view'(el) {
+    Object.assign(ui, { history: el.dataset.view, exercise: null });
     render();
     scrollTop();
   },
@@ -2506,6 +2761,10 @@ document.addEventListener('change', (e) => {
     state.rest = value;
     rest.setMode(value);
     save();
+  } else if (name === 'dots' && Object.hasOwn(DOTS, value)) {
+    state.dots = value;
+    save();
+    render();
   } else if (name === 'lift') {
     ui.lift = value;
     render();

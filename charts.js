@@ -111,6 +111,31 @@ export function progressChart(points, width, height = 170) {
   </svg>`;
 }
 
+const dayOf = (iso) => Date.parse(`${iso}T00:00:00Z`) / 86400000;
+
+// A lift's record over the years as a small step line, from `from` to `to` (ISO days) so the lifts drawn
+// side by side share one time scale: steel to a year before `to`, then the last 12 months in the accent, with
+// a dot on the record. `steps` are each new record, oldest first.
+export function sparkline(steps, from, to, width = 96, height = 34) {
+  const pad = 4;
+  const x0 = dayOf(from);
+  const span = Math.max(1, dayOf(to) - x0);
+  const x = (iso) => pad + ((dayOf(iso) - x0) / span) * (width - 2 * pad);
+  const lo = steps[0].value;
+  const hi = steps[steps.length - 1].value;
+  const y = (v) => (hi === lo ? height / 2 : height - pad - ((v - lo) / (hi - lo)) * (height - 2 * pad));
+  const path = (list, end) => list.map((s, i) => (i ? `H${x(s.date)}V${y(s.value)}` : `M${x(s.date)},${y(s.value)}`)).join('') + `H${end}`;
+  const cut = `${Number(to.slice(0, 4)) - 1}${to.slice(4)}`;
+  const old = steps.filter((s) => s.date <= cut);
+  const recent = [...(old.length ? [{ date: cut, value: old[old.length - 1].value }] : []), ...steps.filter((s) => s.date > cut)];
+  const best = steps[steps.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true">
+    ${old.length ? `<path class="spark-line" d="${path(old, x(cut))}"/>` : ''}
+    <path class="spark-recent" d="${path(recent, width - pad)}"/>
+    <circle class="spark-dot" cx="${x(best.date)}" cy="${y(best.value)}" r="4"/>
+  </svg>`;
+}
+
 // One column per week of everything lifted on that lift (weight × reps); empty weeks draw nothing.
 export function volumeChart(weeks, width, height = 160) {
   const f = frame(weeks, width, height);

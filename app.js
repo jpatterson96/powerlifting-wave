@@ -43,6 +43,8 @@ const ui = {
   history: 'stats', exercise: null, variant: null, editing: null, past: null, muscleWeek: null,
   // The accessory (or superset) opened on the shown day, by its first exercise's id; undefined picks one under way.
   extraOpen: undefined,
+  // The kind of day opened in Settings → Accessories, by its lift (or 'none'); null keeps them all closed.
+  exerciseKind: null,
   // The weight being typed on the app's keypad in a sheet; see startPad.
   pad: null,
 };
@@ -1700,10 +1702,17 @@ const shortDay = (d) => d.slice(0, 3);
 const listDays = (days) => (days.length > 1 ? `${days.slice(0, -1).join(', ')} and ${days[days.length - 1]}` : days.join(''));
 
 // The exercises by kind of day (bench days, squat days, deadlift day), each day's in the order it does them.
+// Each kind is one closed line until it's tapped, and one is open at a time, so the list doesn't run on.
 function exercisesSection() {
   const groups = exercisesByDay(state).map((k) => {
     const key = k.lift ?? 'none';
     const lift = LIFTS.find((l) => l.id === k.lift);
+    const open = ui.exerciseKind === key;
+    const head = `<h3 class="index-group-head"><button class="index-group" data-action="exercise-kind" data-kind="${key}" data-key="exercise-kind-${key}" aria-expanded="${open}">
+        <span class="index-group-name">${lift ? `${lift.short} day${k.days.length > 1 ? 's' : ''}` : 'No set days'}</span>
+        <span class="index-group-days">${lift ? listDays(k.days) : 'Only when added to a day'}. ${k.exercises.length ? plural(k.exercises.length, 'exercise') : 'None yet'}</span>
+      </button></h3>`;
+    if (!open) return head;
     const ownDays = (e) => e.days.length === k.days.length && e.days.every((d) => k.days.includes(d));
     const last = k.exercises.length - 1;
     const rows = k.exercises.map((e, i) => {
@@ -1722,13 +1731,12 @@ function exercisesSection() {
           aria-label="Move ${esc(e.name)} down"${i === last ? ' disabled' : ''}>↓</button>
       </li>`;
     }).join('');
-    return `<h3 class="index-group"><span>${lift ? `${lift.short} day${k.days.length > 1 ? 's' : ''}` : 'No set days'}</span>
-        <span class="index-group-days">${lift ? listDays(k.days) : 'Only when added to a day'}</span></h3>
+    return `${head}
       ${rows ? `<ol class="index-list">${rows}</ol>` : '<p class="hint">None yet.</p>'}`;
   }).join('');
   return `<section class="setting">
     <h2 class="setting-title">Accessories</h2>
-    <p class="hint">Your exercises by the days they show up on, with their rep ranges. Each day lists them under its main lift in this order; the arrows move one within its days.</p>
+    <p class="hint">Your exercises by the days they show up on. Tap a day to see its exercises with their rep ranges, in the order you do them, then tap one to edit it; the arrows move one within its days.</p>
     <div class="index-groups">${groups}</div>
     <button class="btn" data-action="exercise-new">Add an exercise</button>
     <p class="hint credit">Exercise drawings from <a href="https://github.com/AlexMollard/Open-Exercise-Art" target="_blank" rel="noopener">Open Exercise Art</a> by Alex Mollard, <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>, with their lines thickened.</p>
@@ -2289,6 +2297,12 @@ const FORMS = {
     const partner = exerciseById(f.link.value) ?? null;
     const current = e.link ?? state.exercises.find((x) => x.link === e.id)?.id ?? null;
     if ((partner?.id ?? null) !== current) setLink(state, e, partner);
+    // In Settings, a new exercise, or one moved to other days, opens the kind of day it's now under.
+    const kinds = exercisesByDay(state);
+    if (index === null && !kinds.find((k) => (k.lift ?? 'none') === ui.exerciseKind)?.exercises.includes(e)) {
+      const kind = kinds.find((k) => k.exercises.includes(e));
+      ui.exerciseKind = kind ? kind.lift ?? 'none' : null;
+    }
     save();
     exerciseSheet.close();
     render();
@@ -2576,6 +2590,10 @@ const ACTIONS = {
   },
   'exercise-edit'(el) {
     openEditor(el.dataset.exercise);
+  },
+  'exercise-kind'(el) {
+    ui.exerciseKind = el.getAttribute('aria-expanded') === 'true' ? null : el.dataset.kind;
+    render();
   },
   'exercise-move'(el) {
     const e = exerciseById(el.dataset.exercise);

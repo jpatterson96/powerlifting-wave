@@ -99,8 +99,9 @@ results. A weight is typed on the app's own keypad in the sheet, with − and + 
 ## Accessories
 
 Your own exercises, listed under each day's main lift. **Settings → Accessories** shows them by kind
-of day (bench days, squat days, deadlift day) and sets each one's days, sets, rep range
-(e.g. 3 × 8–12), weight jump and rest; the arrows put a day's exercises in the order you do them.
+of day (bench days, squat days, deadlift day), each closed to one line until you tap it, one open at
+a time. Tap an exercise to set its days, sets, rep range (e.g. 3 × 8–12), weight jump and rest; the
+arrows put a day's exercises in the order you do them.
 **Add an exercise** on a training day adds one to that day only.
 
 - **Skip** on an accessory's line (or **Skip today** inside it) for anything you don't do that day;

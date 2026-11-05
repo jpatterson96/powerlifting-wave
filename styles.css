@@ -3399,3 +3399,183 @@ main.is-show {
 .stat-compare {
   margin-top: 18px;
 }
+
+/* ---------- Warm-ups, how heavy days moved, the weekly weigh-in ---------- */
+
+/* The warm-up as steps to tick off, each with its plates a side; a tick lights like a set. */
+.warm {
+  margin-top: 16px;
+}
+
+.warm-title {
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.warm-list {
+  margin: 6px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.warm-step {
+  display: grid;
+  grid-template-columns: 22px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.warm-tick {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--steel);
+  border-radius: 50%;
+  transition: background-color 0.15s, border-color 0.15s, box-shadow 0.25s;
+}
+
+.warm-step.is-done .warm-tick {
+  border-color: var(--chalk);
+  background: var(--chalk);
+  box-shadow: 0 0 10px 1px rgba(238, 241, 244, 0.25);
+}
+
+/* A check drawn in ink on the lit tick. */
+.warm-step.is-done .warm-tick::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 6px;
+  height: 11px;
+  border: solid var(--ink);
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg);
+}
+
+.warm-load {
+  font-weight: 700;
+}
+
+.warm-load small {
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.warm-plates {
+  justify-self: end;
+  color: var(--muted);
+  font-size: 15px;
+  text-align: right;
+}
+
+.warm-step.is-done .warm-load {
+  color: var(--muted);
+}
+
+.warm + .warmup,
+.warm .warmup {
+  margin-top: 8px;
+}
+
+/* After a heavy day's last set: three picks, a grind in red like a short set. */
+.feel {
+  margin-top: 20px;
+}
+
+.feel-title {
+  font: 700 20px/1 var(--display);
+}
+
+.feel-picks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.feel-pick {
+  display: grid;
+  gap: 2px;
+  padding: 10px 6px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: none;
+  text-align: center;
+}
+
+.feel-pick strong {
+  font-size: 16px;
+}
+
+.feel-pick span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.feel-pick[aria-pressed="true"] {
+  border-color: var(--chalk);
+  background: var(--chalk);
+  color: var(--ink);
+}
+
+.feel-pick[aria-pressed="true"] span {
+  color: inherit;
+  opacity: 0.7;
+}
+
+.feel-pick[data-feel="grind"][aria-pressed="true"] {
+  border-color: var(--red);
+  background: var(--red);
+  color: #fff;
+}
+
+.feel-tm {
+  margin-top: 12px;
+}
+
+/* The weekly weigh-in, under the day's clock. */
+.day-weigh {
+  display: block;
+  margin: -6px 0 14px;
+  padding: 0;
+  text-align: left;
+}
+
+.day-weigh-last {
+  font-weight: 500;
+}
+
+/* The GitHub key's expiry and a new key, under the save buttons. */
+.key-expires {
+  margin-top: 18px;
+}
+
+/* The version running, at the very end of Settings. */
+.version {
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.version-load {
+  min-height: 0;
+  padding: 0;
+  color: var(--chalk);
+  font-size: 14px;
+  text-decoration: underline;
+}

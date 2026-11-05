@@ -19,7 +19,14 @@ Live at https://jpatterson96.github.io/powerlifting-wave/
 
 Volume early in the week and intensity later, 72 hours apart for the same lift, is the Texas
 Method's order; putting the heavier day last has also tested well for bench (Zourdos et al. 2016).
-Heavy days should feel smooth, with 2–4 reps left. Harder than that means the max is set too high.
+Heavy days should feel smooth, with 2–4 reps left. Harder than that means the max is set too high, so once a
+heavy day's sets are all logged the app asks how they moved: **Easy** (5+ left), **Smooth** (2–4) or **Grind**
+(0–1). A second grind on the same lift in a block offers a 90% training max in one tap, and the block review
+counts each lift's heavy days by how they felt.
+
+Each day's warm-up is a list to tick off: the empty bar, then the steps up to the working weight (or the re-max
+opener, or the taper week's heavy single), each with its plates a side. The first tick on the day being trained
+starts the workout clock, like **Start workout**.
 
 ## The 8-week block
 
@@ -120,7 +127,8 @@ arrows put a day's exercises in the order you do them.
   last time's weights and reps so the main lifts are fresh. The block after picks up progression from
   the last full week.
 - An exercise loaded with plates (barbell, 45 lb / 20 kg; EZ bar, 25 lb / 10 kg; or a plate-loaded
-  machine, plates only) shows the plates per side for its next set.
+  machine, plates only) shows the plates per side for its next set, from **Settings → Plates you have** (the
+  same sizes the main lift's bar, the warm-ups and the PRs page load from).
 - An exercise **counted in plates a side** (a leg press, hack squat, plate-loaded row or the like) is
   logged as the plates on each side instead of a weight. The whole number is 45s (20s in kg) and the
   tenth is the small plates on top: .5 is a 25 (10 kg) and each .1 a 10 (5 kg), so 2.5 is 45 + 45 + 25,
@@ -151,7 +159,8 @@ it was for. A day left running ends at its last set once you log on a later day,
 same day clears an End tapped too soon. **History → Time** averages this over your days, for planning
 shorter ones.
 
-Apple Health isn't reachable from a web app, so body weight is logged in the app (History → Body).
+Apple Health isn't reachable from a web app, so body weight is logged in the app (History → Body). Until it's
+logged in a week, the day due shows **Log body weight**, which takes it on the same keypad as the sets.
 
 ## PRs
 
@@ -212,9 +221,15 @@ charted.
 
 ## Missed days
 
-The app opens the next day you haven't finished. A missed day waits until you do it or tap
-**Skip this day** (undo is available). If you skip most of a week, the app offers to repeat it;
-after two or more weeks off, it offers to restart the block at week 1.
+The app opens on today's day when it's still to do, so a missed Wednesday doesn't hold up Thursday's bench. Which
+block week is this calendar week comes from the last day you trained on its own day of the week; a block with
+nothing trained yet, or days done on other days, just go in order. On the weekend it opens the next day you
+haven't finished, which you can make up then. Back on screen on a later day, the app returns to Train on the day due.
+
+A day passed over (never started, before the day due or a later day you trained) is marked missed, and a notice
+offers to skip it in one tap; **Not now** puts that off. Tap the day to do it instead. Skipped days don't count
+for or against your next max, and **Skip this day** on any day does the same (undo is available). If you skip most
+of a week, the app offers to repeat it; after two or more weeks off, it offers to restart the block at week 1.
 
 ## Saving to GitHub
 
@@ -232,6 +247,10 @@ It needs an access key that can only touch that one repository:
 6. In the app: **Settings → Save to GitHub**, paste the key, **Connect**.
 
 The key is stored only on the phone. If the phone is lost, delete the key on that same GitHub page.
+
+GitHub doesn't let a web page see when a key expires, so enter the day under **Access key expires on**
+(also offered when connecting). From two weeks before, Train shows a reminder. Make a new key the same way and
+paste it under **Use a new key**: it replaces the old one without loading or overwriting anything.
 On a new phone, use **Restore from GitHub** on the first screen with a new key.
 
 **Load from GitHub** (Settings) replaces the phone's log with the saved copy, for changes made to
@@ -246,9 +265,10 @@ npm test         # program rules: percentages, max changes, rest, plates, schedu
 
 ## Updating
 
-Change the files, bump `CACHE` in `sw.js`, commit and push to `main`. GitHub Pages republishes in
-about a minute; the phone downloads the new version in the background and shows it the next time
-the app opens. Logs saved by older versions (3-week blocks) carry over: their weeks 1–3 become
+Change the files, bump `CACHE` in `sw.js` and `VERSION` in `app.js` to match (a test checks), commit and push
+to `main`. GitHub Pages republishes in about a minute. The phone looks for a new version each time the app comes
+on screen, downloads it in the background, then loads it the next time you come back to the app with no sheet
+open and no rest running (or at once from the end of Settings, which shows the version running). Logs saved by older versions (3-week blocks) carry over: their weeks 1–3 become
 weeks 1–3 of an 8-week block.
 
 ## Backups

@@ -19,6 +19,7 @@ const PARTS = {
   trainingMax: (mine) => mine,
   rest: (mine) => mine,
   dots: (mine) => mine,
+  platesOwned: (mine) => mine,
   blocks: (mine) => mine,
   exercises: joinBy((e) => e.id),
   bodyweight: (mine, theirs) => byDate(joinBy((e) => e.date)(mine, theirs)),

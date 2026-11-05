@@ -53,3 +53,11 @@ test('without a record of the last match, the training log stays and lists are j
   delete older.bodyweight;
   assert.deepEqual(mergeLogs(null, older, log({ bodyweight: [{ date: '2026-11-02', weight: 200 }] })).bodyweight.length, 1);
 });
+
+test('the plates owned are a setting: changed on both sides, the phone keeps its own', () => {
+  const base = log({});
+  const local = log({ platesOwned: [45, 25, 10, 5, 2.5] });
+  const remote = log({ platesOwned: [45, 35, 25, 10, 5, 2.5] });
+  assert.deepEqual(mergeLogs(base, local, remote).platesOwned, [45, 25, 10, 5, 2.5]);
+  assert.deepEqual(mergeLogs(base, log({}), remote).platesOwned, [45, 35, 25, 10, 5, 2.5]);
+});

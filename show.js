@@ -1,6 +1,6 @@
 // The PRs page's entrance, planned on one clock so the bars (on CSS delays) and the numbers over them (stepped in
 // script) agree: each bar drops into its station, its plates fly on a pair at a time, and the collars lock last.
-import { BAR, platesPerSide, tidy } from './logic.js';
+import { BAR, PLATES, platesPerSide, tidy } from './logic.js';
 
 // Milliseconds. The first bar starts at `start` and each later one `stagger` after; a bar takes `drop` to land;
 // plates follow every `plate` ms, each flying for `fly` and touching down `land` of the way through; the finale
@@ -10,9 +10,10 @@ export const SHOW = { start: 160, stagger: 200, drop: 380, plate: 110, fly: 360,
 // One lift's schedule. `steps` is what its number reads from each moment on: the bar when it lands, then every
 // pair of plates as it touches down, then the record itself once the collars are on (which also covers a record
 // the plates can't make exactly). `plateAt(k)` is when plate k starts flying; the collar is plate `plates.length`.
-export function liftShow(value, unit, i, timing = SHOW) {
+// `sizes` is the plates there are to load.
+export function liftShow(value, unit, i, timing = SHOW, sizes = PLATES[unit]) {
   const bar = BAR[unit];
-  const plates = platesPerSide(value, unit);
+  const plates = platesPerSide(value, unit, bar, sizes);
   const t0 = timing.start + i * timing.stagger;
   const landed = t0 + timing.drop;
   const plateAt = (k) => landed + k * timing.plate;
@@ -28,8 +29,8 @@ export function liftShow(value, unit, i, timing = SHOW) {
   return { value, plates, t0, landed, plateAt, lock, steps };
 }
 
-export function showPlan(values, unit, timing = SHOW) {
-  const lifts = values.map((v, i) => liftShow(v, unit, i, timing));
+export function showPlan(values, unit, timing = SHOW, sizes = PLATES[unit]) {
+  const lifts = values.map((v, i) => liftShow(v, unit, i, timing, sizes));
   const done = Math.max(0, ...lifts.map((l) => l.lock));
   return { lifts, done, finale: done + timing.finale };
 }
@@ -48,10 +49,10 @@ export const PR_SHOW = { lights: 340, lightGap: 210, bar: 1000, drop: 380, pause
 // The moment's schedule. `keep` is what both loads share from the bar out, `off` the rest of the old load and `on`
 // the rest of the new one. `steps` is what the number reads from each moment on: the old record (marked `old`) when
 // the bar lands, then each new pair of plates as it touches down, then the record itself once the collars are on.
-export function prShow(oldValue, value, unit, timing = PR_SHOW) {
+export function prShow(oldValue, value, unit, timing = PR_SHOW, sizes = PLATES[unit]) {
   const bar = BAR[unit];
-  const was = platesPerSide(oldValue, unit);
-  const plates = platesPerSide(value, unit);
+  const was = platesPerSide(oldValue, unit, bar, sizes);
+  const plates = platesPerSide(value, unit, bar, sizes);
   let k = 0;
   while (k < was.length && k < plates.length && was[k] === plates[k]) k++;
   const keep = was.slice(0, k);

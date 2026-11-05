@@ -1,6 +1,6 @@
 // Accessory exercises: the lifter's own list, logged with each training day and progressed by rep range
 // (double progression). No DOM access here so it can be tested in Node.
-import { LIFTS, SCHEDULE, BAR, FINISH_WEEK, estimateMax, tidy } from './logic.js';
+import { LIFTS, SCHEDULE, BAR, PLATES, FEELS, FINISH_WEEK, estimateMax, tidy } from './logic.js';
 import { picKeys } from './pics.js';
 
 export const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -383,20 +383,26 @@ const validEntry = (x) => Boolean(x) && typeof x.exercise === 'string' && (x.var
 
 const cleanEntries = (list) => list.filter(validEntry).map((x) => ({ ...x, sets: x.sets.map(cleanSet) }));
 
-// A day's timing: when it started and ended, and when each main-lift set was logged (one slot per set).
+// A day's timing: when it started and ended, when each main-lift set was logged (one slot per set), and when each
+// warm-up step was ticked off (one slot per step, in order).
 function cleanTiming(s) {
   for (const k of ['started', 'ended']) if (s[k] !== undefined && !isTime(s[k])) delete s[k];
   if (s.times !== undefined && !(Array.isArray(s.times) && s.times.length === s.reps.length && s.times.every((t) => t === null || isTime(t)))) delete s.times;
+  if (s.warmups !== undefined && !(Array.isArray(s.warmups) && s.warmups.length <= 12 && s.warmups.every((t) => t === null || isTime(t)))) delete s.warmups;
 }
 
 const LIFT_IDS = LIFTS.map((l) => l.id);
 const validMax = (n) => typeof n === 'number' && n > 0 && n < 5000;
 
 // Drops anything malformed in the optional data (accessories, body weight, earlier maxes, the days maxes
-// were set, and workout times) instead of rejecting the whole log, and fills in the fields older logs don't have.
+// were set, workout times, warm-ups, how heavy days felt and the plates owned) instead of rejecting the whole log,
+// and fills in the fields older logs don't have.
 export function cleanExtras(state) {
   // The DOTS formula for History → Stats (stats.js DOTS): men's or women's, else none picked yet.
   if (state.dots !== undefined && !['men', 'women'].includes(state.dots)) delete state.dots;
+  // The plate sizes the lifter has (logic.js plateSizes), in the log's unit; without it, every size.
+  const owned = state.platesOwned;
+  if (owned !== undefined && !(Array.isArray(owned) && owned.length && owned.every((p) => PLATES[state.unit].includes(p)))) delete state.platesOwned;
   state.exercises =Array.isArray(state.exercises) ? state.exercises.map(cleanChoices).filter(validExercise) : [];
   state.bodyweight = Array.isArray(state.bodyweight)
     ? state.bodyweight.filter((e) => e && isDate(e.date) && typeof e.weight === 'number' && e.weight > 0) : [];
@@ -419,6 +425,7 @@ export function cleanExtras(state) {
       for (const s of week) {
         if (s.extras !== undefined) s.extras = Array.isArray(s.extras) ? cleanEntries(s.extras) : [];
         if (s.date !== undefined && !isDate(s.date)) delete s.date;
+        if (s.feel !== undefined && !FEELS.includes(s.feel)) delete s.feel;
         cleanTiming(s);
       }
     }

@@ -3,7 +3,7 @@ import {
   prescription, ROUNDING, REST_MODES, BAR, tidy, roundTo, workingMax, targetWeight, estimateMax, weekMax, attemptBase, attemptWeight, setWeight,
   singleWeight, restSeconds, platesPerSide, warmups, emptyState, newBlock, finishFor, setFinish, sessionStatus,
   weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak, restartBlock, evaluateLift, liftHistory,
-  maxChanges, liftRecord, convertState, upgrade,
+  maxChanges, liftRecord, convertState, upgrade, PLATES, plateSizes, dueSession, missedSessions, FEELS, GRINDS, heavyFeel,
 } from './logic.js';
 import {
   WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, SMALL_PLATES, isCounted, countedPlates, weightOf, loadOf, PLATES_UP_TO, GUESSED_STEP, looksCounted, countInPlates, isLightWeek, plannedSets, newExercise,
@@ -13,13 +13,15 @@ import {
 import { mergeLogs } from './merge.js';
 import { DECIMALS, press, typed, nudge } from './pad.js';
 import { PICS, picFor, picFile } from './pics.js';
-import { showPlan, prShow, stepAt } from './show.js';
+import { SHOW, PR_SHOW, showPlan, prShow, stepAt } from './show.js';
 import * as sync from './sync.js';
 import * as rest from './rest.js';
 import { maxChart, volumeChart, progressChart, sparkline } from './charts.js';
 import { DOTS, STUCK_AFTER, strength, gains, maxChecks, nextTest, consistency, totals, accessoryTrends } from './stats.js';
 
 const KEY = 'powerlifting-wave';
+// The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
+const VERSION = 'wave-v20';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -43,6 +45,8 @@ const ui = {
   history: 'stats', exercise: null, variant: null, editing: null, past: null, muscleWeek: null,
   // The accessory (or superset) opened on the shown day, by its first exercise's id; undefined picks one under way.
   extraOpen: undefined,
+  // The missed days whose notice was put off with Not now (see missedKey); it comes back if they change.
+  missedLater: null,
   // The kind of day opened in Settings → Accessories, by its lift (or 'none'); null keeps them all closed.
   exerciseKind: null,
   // The weight being typed on the app's keypad in a sheet; see startPad.
@@ -50,6 +54,8 @@ const ui = {
 };
 // The numbers behind each History chart, by its data-chart name, for the tooltips.
 const chartData = {};
+// A newer version downloaded and ready, by its cache name (see checkUpdate).
+let update = null;
 
 // Colour, height and thickness for one side of the bar, heaviest plates biggest.
 const PLATE_STYLE = {
@@ -142,10 +148,23 @@ function spanText(ms) {
   return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
 }
 
-function todayISO() {
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const todayISO = () => isoDay(new Date());
+
+// The Monday of this week.
+function weekStartISO() {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return isoDay(d);
 }
+
+const addDays = (iso, n) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return isoDay(new Date(y, m - 1, d + n));
+};
+
+// Whole days from one date to another.
+const daysBetween = (from, to) => Math.round((Date.parse(to) - Date.parse(from)) / 86400000);
 
 const isDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
@@ -274,15 +293,20 @@ function setupView() {
   </section>`;
 }
 
-function syncForm() {
-  return `<form class="sync-form" id="sync-form" novalidate>
+// `id` is sync-form to connect, or rekey-form to swap in a new key while connected.
+function syncForm(id = 'sync-form') {
+  return `<form class="sync-form" id="${id}" novalidate>
     <label class="field">
       <span class="field-label">Access key</span>
       <span class="field-row">
         <input class="text-input" name="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_">
       </span>
     </label>
-    <button class="btn" type="submit">Connect</button>
+    <label class="date-field">
+      <span class="field-note">Expires on</span>
+      <input class="date-input" name="expires" type="date" min="${todayISO()}">
+    </label>
+    <button class="btn" type="submit">${id === 'rekey-form' ? 'Use this key' : 'Connect'}</button>
   </form>`;
 }
 
@@ -303,7 +327,7 @@ function syncSection() {
       ${syncForm()}
     </section>`;
   }
-  return `<section class="setting">
+  return `<section class="setting" id="sync-setting">
     <h2 class="setting-title">Save to GitHub</h2>
     ${syncStatusLine()}
     <p class="hint">GitHub keeps every saved version, so an older log can always be recovered. Load from GitHub brings in changes made somewhere else, replacing this phone's log.</p>
@@ -312,6 +336,16 @@ function syncSection() {
       <button class="btn-quiet" data-action="sync-load">Load from GitHub</button>
       <button class="btn-quiet" data-action="sync-disconnect">Disconnect</button>
     </div>
+    <label class="date-field key-expires">
+      <span class="field-note">Access key expires on</span>
+      <input class="date-input" name="keyExpires" type="date" value="${sync.keyExpires() ?? ''}">
+    </label>
+    <p class="hint">GitHub won't tell the app, so copy it from the key's page: github.com → Settings → Developer settings → Fine-grained tokens. Two weeks before, Train reminds you to make a new one.</p>
+    <details class="restore-github">
+      <summary class="btn-quiet">Use a new key</summary>
+      <p class="hint">Make one the same way as the first (Generate new token on that page, only the powerlifting-wave-data repository, Contents read and write), then paste it here. Your log stays as it is.</p>
+      ${syncForm('rekey-form')}
+    </details>
   </section>`;
 }
 
@@ -336,23 +370,47 @@ function weekNote(b, week) {
   return `${WEEKS[week].note}. ${HEAVY_CUE} Missed a day? Do it next time you train, or skip it.`;
 }
 
-// Opens the next day to train if it's in this week, otherwise the week's first unfinished day.
+// Opens the day due today if it's in this week, otherwise the week's first unfinished day.
 function defaultOpen(b, week) {
-  const next = nextSession(b);
-  if (next?.week === week) return next.index;
+  const due = dueSession(b, todayISO());
+  if (due?.week === week) return due.index;
   const index = b.log[week].findIndex((s) => ['todo', 'started'].includes(sessionStatus(s)));
   return index === -1 ? null : index;
 }
 
-// Guidance for missed training: restart after a long break, repeat a mostly skipped week.
+// Days passed over, as "missed" keys, so the notice about them can be put off until they change.
+const missedKey = (missed) => missed.map((m) => `${m.week}-${m.index}`).join(' ');
+
+// Guidance for missed training: restart after a long break, skip days passed over, repeat a mostly skipped week.
+// A GitHub key about to run out gets its own notice on top.
 function notice(b) {
-  const days = longBreak(b, todayISO());
+  return `${trainingNotice(b)}${keyNotice()}`;
+}
+
+function trainingNotice(b) {
+  const today = todayISO();
+  const days = longBreak(b, today);
   if (days) {
     return `<aside class="notice">
       <p>It's been ${days} days since you last trained. After two weeks or more off, restart the block at week 1 rather than picking up where you left off.</p>
       <div class="button-row">
         <button class="btn" data-action="restart-block">Restart at week 1</button>
         <button class="btn-quiet" data-action="keep-going">Keep going</button>
+      </div>
+    </aside>`;
+  }
+  const missed = missedSessions(b, today);
+  if (missed.length && ui.missedLater !== missedKey(missed)) {
+    const names = missed.map(({ week, index }) => {
+      const s = b.log[week][index];
+      return `${s.day}'s ${liftOf(s).name.toLowerCase()}${week === ui.week ? '' : ` in week ${week + 1}`}`;
+    });
+    const one = missed.length === 1;
+    return `<aside class="notice">
+      <p>You missed ${listDays(names)}. Skip ${one ? 'it' : 'them'} to move on, or tap ${one ? 'the day' : 'a day'} to do it now. Skipped days don't count for or against your next max.</p>
+      <div class="button-row">
+        <button class="btn" data-action="skip-missed">${one ? `Skip ${b.log[missed[0].week][missed[0].index].day}` : missed.length === 2 ? 'Skip both' : `Skip all ${missed.length}`}</button>
+        <button class="btn-quiet" data-action="missed-later">Not now</button>
       </div>
     </aside>`;
   }
@@ -368,18 +426,39 @@ function notice(b) {
   return '';
 }
 
+// Two weeks before the GitHub key runs out (the day entered in Settings), a reminder to make a new one.
+const KEY_WARN_DAYS = 14;
+
+function keyNotice() {
+  const expires = sync.keyExpires();
+  const today = todayISO();
+  if (!sync.isConnected() || !expires || sync.keyRemindAfter() >= today) return '';
+  const left = daysBetween(today, expires);
+  if (left > KEY_WARN_DAYS) return '';
+  const when = left > 1 ? `expires in ${left} days, on ${shortDate(expires)}` : left === 1 ? 'expires tomorrow' : left === 0 ? 'expires today' : `expired on ${shortDate(expires)}`;
+  return `<aside class="notice">
+    <p>Your GitHub access key ${when}. Make a new one and add it in Settings → Save to GitHub, or saving stops.</p>
+    <div class="button-row">
+      <button class="btn" data-action="tab" data-tab="settings" data-to="sync-setting">Open Settings</button>
+      <button class="btn-quiet" data-action="key-later">Not today</button>
+    </div>
+  </aside>`;
+}
+
 function trainView() {
   const b = block();
   const n = state.blocks.length;
-  if (ui.week === null || ui.week >= b.log.length) ui.week = currentWeek(b);
-  // One day shows at a time: the one picked, else the next to train, else the week's first.
+  // The day due today: today's day of the week when it's still to do, else the next to train (see dueSession).
+  const next = dueSession(b, todayISO());
+  if (ui.week === null || ui.week >= b.log.length) ui.week = next?.week ?? currentWeek(b);
+  // One day shows at a time: the one picked, else the one due, else the week's first.
   if (ui.open === undefined || ui.open === null || ui.open >= b.log[ui.week].length) ui.open = defaultOpen(b, ui.week) ?? 0;
-  const next = nextSession(b);
   const last = ui.week === b.log.length - 1;
   const finish = ui.week === FINISH_WEEK
     ? `<button class="btn-quiet" data-action="switch-finish">${b.finish === 'remax' ? 'Deload this week instead' : 'Re-max this week instead'}</button>`
     : '';
   const session = b.log[ui.week][ui.open];
+  const missed = missedSessions(b, todayISO());
   return `<header class="top">
       <h1 class="display">Block ${n}</h1>
       <p class="top-meta">Started ${shortDate(b.started)}</p>
@@ -387,8 +466,8 @@ function trainView() {
     ${notice(b)}
     ${waveNav(b)}
     <p class="week-line"><span class="week-count">Week ${ui.week + 1} of ${BLOCK_WEEKS}</span> <span class="week-title">${weekName(b, ui.week)}</span></p>
-    ${dayTabs(b, next)}
-    ${dayPanel(b, session, ui.open, next?.week === ui.week && next.index === ui.open)}
+    ${dayTabs(b, next, missed)}
+    ${dayPanel(b, session, ui.open, next?.week === ui.week && next.index === ui.open, isMissed(missed, ui.week, ui.open))}
     <section class="week-head">
       <h2 class="week-about">About week ${ui.week + 1}</h2>
       <p class="week-note">${weekNote(b, ui.week)}</p>
@@ -415,13 +494,16 @@ function waveNav(b) {
 const liftOf = (session) => LIFTS.find((l) => l.id === session.lift);
 const isHeavyDay = (session) => session.kind === 'heavy' && ui.week !== FINISH_WEEK;
 
+const isMissed = (missed, week, index) => missed.some((m) => m.week === week && m.index === index);
+
 // The week's days as tabs, each with a light: white when done, a ring when started, a dash when skipped.
-function dayTabs(b, next) {
+function dayTabs(b, next, missed) {
   const days = b.log[ui.week];
   return `<nav class="days" aria-label="Days" style="--n:${days.length}">${days.map((s, i) => {
     const status = sessionStatus(s);
     const isNext = next?.week === ui.week && next.index === i;
-    const said = { done: 'done', skipped: 'skipped', started: 'started', todo: isNext ? 'up next' : 'not started' }[status];
+    const todo = isMissed(missed, ui.week, i) ? 'missed' : isNext ? 'up next' : 'not started';
+    const said = { done: 'done', skipped: 'skipped', started: 'started', todo }[status];
     return `<button class="day-tab" data-action="session" data-index="${i}" data-key="day-${i}" data-status="${status}"${isNext ? ' data-next' : ''}
         aria-pressed="${ui.open === i}" aria-label="${s.day}, ${liftOf(s).name}, ${said}">
       <span class="day-tab-day">${s.day.slice(0, 3)}</span>
@@ -431,7 +513,7 @@ function dayTabs(b, next) {
   }).join('')}</nav>`;
 }
 
-function dayPanel(b, session, i, isNext) {
+function dayPanel(b, session, i, isNext, missed) {
   const status = sessionStatus(session);
   const logged = session.reps.filter((r) => r !== null).length;
   const what = session.kind === 'max' ? 'attempt' : 'set';
@@ -439,7 +521,7 @@ function dayPanel(b, session, i, isNext) {
     skipped: 'Skipped',
     done: 'Done',
     started: `${logged} of ${plural(session.reps.length, what)}`,
-    todo: isNext ? 'Up next' : '',
+    todo: missed ? 'Missed' : isNext ? 'Up next' : '',
   }[status];
   const tag = session.kind === 'max' ? ', re-max' : isHeavyDay(session) ? ', heavy day' : '';
   return `<section class="day-panel" data-status="${status}" aria-label="${session.day}">
@@ -449,6 +531,7 @@ function dayPanel(b, session, i, isNext) {
       <span class="session-state">${label}</span>
     </div>
     ${dayTiming(session, i)}
+    ${isNext ? weighIn(session) : ''}
     ${sessionBody(b, session, i)}
     ${daySummary(b, session, i)}
   </section>`;
@@ -466,6 +549,16 @@ function dayTiming(session, i) {
   const reopen = session.date === todayISO()
     ? ` <button class="btn-quiet day-reopen" data-action="workout-reopen" data-index="${i}" data-key="reopen-${i}">Reopen</button>` : '';
   return `<p class="day-time">${clockTime(session.started)} to ${clockTime(session.ended)}, ${spanText(workoutTime(session).total)}.${reopen}</p>`;
+}
+
+// Once a week, on the first day trained, a reminder to log body weight: the strength-for-size numbers in Stats
+// use the latest.
+function weighIn(session) {
+  if (session.skipped) return '';
+  const latest = state.bodyweight[state.bodyweight.length - 1];
+  if (latest && latest.date >= weekStartISO()) return '';
+  return `<button class="btn-quiet day-weigh" data-action="bodyweight-open" data-key="weigh-in">Log body weight${latest
+    ? `<span class="day-weigh-last">, last ${fmt(latest.weight)} on ${shortDate(latest.date)}</span>` : ''}</button>`;
 }
 
 // Keeps the running time on a started day current without redrawing the page.
@@ -492,7 +585,7 @@ function sessionBody(b, session, i) {
   const target = targetWeight(work, session.kind, ui.week, state.round);
   const shown = session.weight ?? target;
   const single = singleWeight(b, session, ui.week, state);
-  const ramp = warmups(work, single ?? shown, state.unit, state.round).map((s) => `, ${fmt(s.weight)} × ${s.reps}`).join('');
+  const ramp = [...warmups(work, single ?? shown, state.unit, state.round), ...(single ? [{ weight: single, reps: '1', single: true }] : [])];
   const moved = max - b.max[lift.id];
   const tested = moved && ui.week >= WAVE_TWO ? maxSince(maxChanges(state, lift.id), state.blocks.length - 1, ui.week).date : null;
   const movedNote = moved && ui.week >= WAVE_TWO
@@ -506,15 +599,76 @@ function sessionBody(b, session, i) {
     </button>
     ${session.weight !== null && session.weight !== target ? `<p class="lift-target">Target is ${fmt(target)}</p>` : ''}
     ${barbell(shown)}
-    <p class="warmup">Warm-up: empty bar × 5–10${ramp}</p>
-    ${single ? `<p class="warmup">Then one heavy single: ${fmt(single)} × 1 at ${tidy(p.single * 100)}%. Rest 3 minutes before your sets.</p>` : ''}
+    ${warmupList(session, i, ramp, single ? `The last is one heavy single at ${tidy(p.single * 100)}%. Rest 3 minutes after it, before your sets.` : '')}
     ${isHeavyDay(session) ? '<p class="hint">Heavy day: stop each set with 2–4 reps left in the tank.</p>' : ''}
     <div class="sets" role="group" aria-label="${lift.name} sets">
       ${session.reps.map((r, s) => setLight(session, i, s, r)).join('')}
     </div>
+    ${isHeavyDay(session) && sessionStatus(session) === 'done' ? feelCheck(b, session, i) : ''}
     ${skipButton(session, i)}
     ${extrasSection(session, i)}
   </div>`;
+}
+
+// One side's plates for a weight on the barbell, from the plates you have: "45 + 10 + 2.5", with what they make
+// when it isn't the weight.
+function barPlates(weight) {
+  const plates = platesPerSide(weight, state.unit, BAR[state.unit], plateSizes(state));
+  if (!plates.length) return 'Empty bar';
+  const made = tidy(BAR[state.unit] + 2 * plates.reduce((sum, p) => sum + p, 0));
+  return `${plates.map(fmt).join(' + ')}${made === weight ? '' : ` (${fmt(made)})`}`;
+}
+
+// The warm-up as steps to tick off, each with the plates a side: the empty bar, then `ramp` ({ weight, reps },
+// a taper day's heavy single marked `single`). A tick is kept in session.warmups by step; the first tick of the
+// day starts the workout clock.
+function warmupList(session, i, ramp, note) {
+  const steps = [{ weight: BAR[state.unit], reps: '5–10' }, ...ramp];
+  const rows = steps.map((s, k) => {
+    const done = Boolean(session.warmups?.[k]);
+    return `<li><button class="warm-step${done ? ' is-done' : ''}" data-action="warmup" data-index="${i}" data-step="${k}" data-key="warm-${i}-${k}" aria-pressed="${done}">
+      <i class="warm-tick" aria-hidden="true"></i>
+      <span class="warm-load">${fmt(s.weight)} × ${s.reps}${s.single ? ' <small>single</small>' : ''}</span>
+      <span class="warm-plates">${barPlates(s.weight)}</span>
+    </button></li>`;
+  }).join('');
+  return `<section class="warm" aria-label="Warm-up">
+    <h3 class="warm-title">Warm-up</h3>
+    <ol class="warm-list">${rows}</ol>
+    ${note ? `<p class="warmup">${note}</p>` : ''}
+  </section>`;
+}
+
+// After the last set of a heavy day: how the sets moved, since heavy days should leave 2–4 reps in the tank. Two
+// grinds on a lift in a block say its max is set too high, which a 90% training max fixes.
+const FEEL_TEXT = { easy: ['Easy', '5+ left'], smooth: ['Smooth', '2–4 left'], grind: ['Grind', '0–1 left'] };
+const FEEL_SAID = {
+  easy: 'More in the tank than a heavy day needs. Your week 3 and 6 test sets will move the max if it’s low.',
+  smooth: 'Right where a heavy day should be.',
+  grind: `One grind can be a bad day. ${GRINDS} in a block says your max is set too high.`,
+};
+
+function feelCheck(b, session, i) {
+  const lift = liftOf(session);
+  const picks = FEELS.map((f) => `<button class="feel-pick" data-action="feel" data-index="${i}" data-feel="${f}" data-key="feel-${i}-${f}" aria-pressed="${session.feel === f}">
+      <strong>${FEEL_TEXT[f][0]}</strong><span>${FEEL_TEXT[f][1]}</span>
+    </button>`).join('');
+  const grinds = heavyFeel(b, lift.id).grind;
+  let said = session.feel ? `<p class="hint">${FEEL_SAID[session.feel]}</p>` : '';
+  if (session.feel === 'grind' && grinds >= GRINDS) {
+    const max = weekMax(b, lift.id, ui.week, state);
+    const now = targetWeight(workingMax(max, state), session.kind, ui.week, state.round);
+    const tm = targetWeight(max * 0.9, session.kind, ui.week, state.round);
+    said = state.trainingMax
+      ? `<p class="hint">That's ${grinds} grinds on heavy ${lift.short.toLowerCase()} days this block, already on a 90% training max. Lower your ${lift.short.toLowerCase()} max in Settings → Current maxes.</p>`
+      : `<p class="hint">That's ${grinds} grinds on heavy ${lift.short.toLowerCase()} days this block: your max is likely set too high. A 90% training max takes every percentage from 90% of your maxes, all three lifts, so today's ${fmt(now)} would have been ${fmt(tm)}.</p>
+        <button class="btn-line feel-tm" data-action="feel-tm" data-key="feel-tm-${i}">Use a 90% training max</button>`;
+  }
+  return `<section class="feel" aria-label="How the sets moved">
+    <h3 class="feel-title">How did they move?</h3>
+    <div class="feel-picks">${picks}</div>
+    ${said}
+  </section>`;
 }
 
 // Where a training day sits in the log, for finding the last time an accessory was done before it.
@@ -633,7 +787,7 @@ function plateNote(e, weight) {
   const load = LOADS[e.plates];
   const bar = load.bar[state.unit];
   if (weight < bar) return `${fmt(weight)} is lighter than the empty ${load.name}.`;
-  const plates = platesPerSide(weight, state.unit, bar);
+  const plates = platesPerSide(weight, state.unit, bar, plateSizes(state));
   const made = tidy(bar + 2 * plates.reduce((sum, p) => sum + p, 0));
   const on = bar ? `, on the ${fmt(bar)} ${state.unit} ${load.name}` : '';
   const text = `${fmt(weight)} ${state.unit}: ${plates.length ? `${plates.map(fmt).join(' + ')} each side${on}` : `the empty ${load.name}`}`;
@@ -758,8 +912,7 @@ function remaxBody(b, session, i) {
   const base = attemptBase(b, lift.id, state);
   const weights = session.reps.map((_, a) => setWeight(b, session, ui.week, a, state));
   const fromTest = base !== weekMax(b, lift.id, FINISH_WEEK - 1, state);
-  const ramp = warmups(base, weights[0], state.unit, state.round, REMAX_RAMP[lift.id === 'deadlift' ? 'deadlift' : 'lift'])
-    .map((s) => `, ${fmt(s.weight)} × ${s.reps}`).join('');
+  const ramp = warmups(base, weights[0], state.unit, state.round, REMAX_RAMP[lift.id === 'deadlift' ? 'deadlift' : 'lift']);
   const next = session.reps.findIndex((r) => r === null);
   const loading = next === -1 ? null : next;
   const good = weights.filter((_, a) => session.reps[a] === 1);
@@ -773,7 +926,7 @@ function remaxBody(b, session, i) {
     </li>`).join('');
   return `<div class="session-body">
     <p class="lift-scheme">Attempts are built from ${fmt(base)}, ${fromTest ? 'the estimate from your week 6 test set' : 'your max'}. Rest ${restText(restSeconds(session, ui.week, 1))} before each attempt.</p>
-    <p class="warmup">Warm-up: empty bar × 5–10${ramp}. Rest 2–3 minutes between warm-ups.</p>
+    ${warmupList(session, i, ramp, 'Rest 2–3 minutes between warm-ups.')}
     <ol class="attempts">${attempts}</ol>
     ${loading !== null ? barbell(weights[loading], ATTEMPT_NAMES[loading]) : ''}
     <p class="hint">Pick the third from how the second moved: fast, go for ${fmt(weights[2])}; slow, take about ${fmt(slow)}; a grind, stop there and mark the third a pass.</p>
@@ -784,7 +937,7 @@ function remaxBody(b, session, i) {
 }
 
 function barbell(total, attempt) {
-  const plates = platesPerSide(total, state.unit);
+  const plates = platesPerSide(total, state.unit, BAR[state.unit], plateSizes(state));
   const loaded = tidy(BAR[state.unit] + 2 * plates.reduce((sum, p) => sum + p, 0));
   let caption = plates.length ? `${attempt ? `${attempt}, each side` : 'Each side'}: ${plates.map(fmt).join(' + ')}` : 'Empty bar';
   if (total < BAR[state.unit]) caption = 'Lighter than the empty bar';
@@ -914,7 +1067,7 @@ function showBar(lift, id, i, sleeve, burst = false) {
 let show = null;
 function prsView() {
   const records = LIFTS.map((l) => ({ l, r: liftRecord(state, l.id) })).filter(({ r }) => r);
-  const plan = showPlan(records.map(({ r }) => r.value), state.unit);
+  const plan = showPlan(records.map(({ r }) => r.value), state.unit, SHOW, plateSizes(state));
   const sleeve = Math.max(100, ...plan.lifts.map((lift) => stackWidth(lift.plates) + 18));
   const total = tidy(records.reduce((sum, { r }) => sum + r.value, 0));
   show = plan;
@@ -979,7 +1132,7 @@ function runShow() {
 // the old record's bar is made into the new one (see prShow in show.js). A tap anywhere closes it.
 
 function openMoment(lift, old, value) {
-  const plan = prShow(old, value, state.unit);
+  const plan = prShow(old, value, state.unit, PR_SHOW, plateSizes(state));
   const sleeve = Math.max(100, stackWidth(plan.plates) + 18, stackWidth([...plan.keep, ...plan.off]) + 18);
   const bar = showBar(plan, lift.id, 'pr', sleeve, true);
   moment.firstElementChild.innerHTML = `
@@ -1090,6 +1243,17 @@ function reviewReason(r, liftId) {
   }
 }
 
+// How the block's heavy days of a lift felt, where any were rated.
+function reviewFeel(b, lift) {
+  const feel = heavyFeel(b, lift.id);
+  if (!feel.days) return '';
+  const counts = FEELS.filter((f) => feel[f]).map((f) => (f === 'grind' ? plural(feel[f], 'grind') : `${feel[f]} ${FEEL_TEXT[f][0].toLowerCase()}`));
+  const advice = feel.grind < GRINDS ? ''
+    : state.trainingMax ? ' That many grinds on a 90% training max says to take this max down.'
+      : ' That many grinds says the max was set too high: take this one down, or switch to a 90% training max in Settings → Work from.';
+  return `<p class="hint">Heavy days: ${listDays(counts)}.${advice}</p>`;
+}
+
 function reviewView() {
   const b = block();
   const n = state.blocks.length;
@@ -1104,6 +1268,7 @@ function reviewView() {
         return `<section class="review-lift">
           <h2 class="lift-name">${l.name}</h2>
           <p class="review-why${result.change > 0 ? '' : ' is-held'}">${reviewReason(result, l.id)}</p>
+          ${reviewFeel(b, l)}
           ${maxField({ ...l, name: `New max, was ${fmt(b.max[l.id])}` }, fmt(result.suggested))}
         </section>`;
       }).join('')}
@@ -1655,6 +1820,11 @@ function settingsView() {
       <p class="hint">2.5 ${state.unit} rounding needs a pair of 1.25 ${state.unit} plates.</p>
     </fieldset>
     <fieldset class="setting">
+      <legend class="setting-title">Plates you have</legend>
+      <div class="day-boxes plate-boxes">${PLATES[state.unit].map((p) => `<label class="day-box"><input type="checkbox" name="plate" value="${p}"${plateSizes(state).includes(p) ? ' checked' : ''}><span>${fmt(p)}</span></label>`).join('')}</div>
+      <p class="hint">Plates a side on the bar, in the warm-ups, for accessories and on the PRs page use only these.</p>
+    </fieldset>
+    <fieldset class="setting">
       <legend class="setting-title">Work from</legend>
       ${segmented('trainingMax', maxOptions, String(state.trainingMax))}
       <p class="hint">Switch to a 90% training max if your max was a grind, or your 2+ sets start coming up short.</p>
@@ -1695,7 +1865,15 @@ function settingsView() {
         ? 'Deletes every block on this phone and disconnects GitHub. The log saved on GitHub stays there, so you can restore it later.'
         : 'Deletes every block on this phone. Save a backup first if you might want it back.'}</p>
       <button class="btn-danger" data-action="erase">Erase all data</button>
-    </section>`;
+    </section>
+    ${versionLine()}`;
+}
+
+// The version running, and a newer one once it has downloaded (see watchUpdates).
+function versionLine() {
+  const number = (v) => v.replace(/^wave-v/, '');
+  return `<p class="version" id="version">Version ${number(VERSION)}${update
+    ? `. Version ${number(update)} is ready. <button class="btn-quiet version-load" data-action="update-load">Load it now</button>` : ''}</p>`;
 }
 
 const shortDay = (d) => d.slice(0, 3);
@@ -2119,7 +2297,26 @@ function openWeight(index, attempt) {
   document.getElementById('weight-note').textContent = attempt === undefined
     ? `Target ${fmt(target)} ${state.unit}. Change it if you loaded something different.`
     : `Suggested ${fmt(target)} ${state.unit}. Change it to the weight you'll take.`;
+  document.getElementById('weight-label').textContent = 'Weight on the bar';
+  weightSheet.querySelector('[data-action="weight-reset"]').hidden = false;
   startPad('weight', current ?? target, { step: state.round });
+  renderPad();
+  weightSheet.showModal();
+}
+
+// Today's body weight, on the same keypad, from the button on the day due.
+const BODY_STEP = { lb: 1, kg: 0.5 };
+
+function openBodyweight() {
+  const latest = state.bodyweight[state.bodyweight.length - 1];
+  ui.sheet = { bodyweight: true };
+  document.getElementById('weight-title').textContent = 'Body weight';
+  document.getElementById('weight-note').textContent = latest
+    ? `Last ${fmt(latest.weight)} ${state.unit} on ${shortDate(latest.date)}. Weigh in the same way each time, like first thing in the morning.`
+    : 'Weigh in the same way each time, like first thing in the morning.';
+  document.getElementById('weight-label').textContent = 'Today';
+  weightSheet.querySelector('[data-action="weight-reset"]').hidden = true;
+  startPad('weight', latest?.weight ?? null, { step: BODY_STEP[state.unit] });
   renderPad();
   weightSheet.showModal();
 }
@@ -2136,6 +2333,14 @@ function saveWeight(value) {
   save();
   weightSheet.close();
   render();
+}
+
+function saveBodyweight(weight) {
+  logBodyweight(state, todayISO(), weight);
+  save();
+  weightSheet.close();
+  render();
+  toast(`Body weight logged, ${fmt(weight)} ${state.unit}.`);
 }
 
 // ---------- Backup ----------
@@ -2189,6 +2394,9 @@ async function restore(file) {
 
 // ---------- Forms ----------
 
+// The key's expiry day typed in a connect form, or null.
+const expiresField = (form) => (isDay(form.elements.expires?.value ?? '') ? form.elements.expires.value : null);
+
 // `previous` holds the stored maxes: a field left as shown keeps its full-precision value.
 function readMaxes(form, previous) {
   const max = {};
@@ -2232,7 +2440,7 @@ const FORMS = {
     const button = form.querySelector('button[type="submit"]');
     button.disabled = true;
     button.textContent = 'Connecting…';
-    const result = await sync.connect(token);
+    const result = await sync.connect(token, expiresField(form));
     if (!result.ok) {
       button.disabled = false;
       button.textContent = 'Connect';
@@ -2261,6 +2469,22 @@ const FORMS = {
       form.closest('.restore-github')?.replaceWith(Object.assign(document.createElement('div'), { innerHTML: syncStatusLine() }).firstElementChild);
     }
     toast('Connected to GitHub.');
+  },
+  // A new key for the same repository, for one about to run out; nothing about the log changes.
+  async 'rekey-form'(form) {
+    const token = form.elements.token.value.trim();
+    if (!token) return toast('Paste your new GitHub access key first.');
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    button.textContent = 'Checking…';
+    const result = await sync.rekey(token, expiresField(form));
+    if (!result.ok) {
+      button.disabled = false;
+      button.textContent = 'Use this key';
+      return toast(result.message);
+    }
+    render();
+    toast(sync.keyExpires() ? `New key in use, until ${shortDate(sync.keyExpires())}.` : 'New key in use. Add the day it expires for a reminder.');
   },
   'exercise-form'(form) {
     const f = form.elements;
@@ -2356,10 +2580,66 @@ const FORMS = {
 // ---------- Events ----------
 
 const ACTIONS = {
+  // `data-to` names a part of the tab to scroll to.
   tab(el) {
     Object.assign(ui, { tab: el.dataset.tab, reviewing: false });
     render();
-    scrollTop();
+    const to = el.dataset.to && document.getElementById(el.dataset.to);
+    if (to) to.scrollIntoView();
+    else scrollTop();
+  },
+  'skip-missed'() {
+    const b = block();
+    for (const { week, index } of missedSessions(b, todayISO())) b.log[week][index].skipped = true;
+    save();
+    render();
+  },
+  'missed-later'() {
+    ui.missedLater = missedKey(missedSessions(block(), todayISO()));
+    render();
+  },
+  'key-later'() {
+    sync.remindKeyAfter(todayISO());
+    render();
+  },
+  // A warm-up step ticked off, or back on. The first tick on the day being trained starts the workout clock, as
+  // Start workout does; a day already done or from an earlier day just keeps the tick.
+  warmup(el) {
+    const index = Number(el.dataset.index);
+    const step = Number(el.dataset.step);
+    const session = sessionAt(index);
+    const ticks = session.warmups ?? [];
+    while (ticks.length <= step) ticks.push(null);
+    ticks[step] = ticks[step] ? null : nowISO();
+    if (ticks.every((t) => t === null)) delete session.warmups;
+    else session.warmups = ticks;
+    const starts = ticks[step] && !session.started && sessionStatus(session) === 'todo' && (!session.date || session.date === todayISO());
+    if (starts) {
+      session.started = nowISO();
+      markTrained(session);
+    }
+    save();
+    render();
+    if (starts) toast('Workout started.');
+  },
+  feel(el) {
+    const session = sessionAt(Number(el.dataset.index));
+    if (session.feel === el.dataset.feel) delete session.feel;
+    else session.feel = el.dataset.feel;
+    save();
+    render();
+  },
+  'feel-tm'() {
+    state.trainingMax = true;
+    save();
+    render();
+    toast('Working from a 90% training max. Switch back in Settings → Work from.');
+  },
+  'bodyweight-open'() {
+    openBodyweight();
+  },
+  'update-load'() {
+    location.reload();
   },
   week(el) {
     ui.week = Number(el.dataset.week);
@@ -2477,6 +2757,7 @@ const ACTIONS = {
     if (ui.pad.host === 'weight') {
       // Checked after rounding: a weight that rounds to 0 would make the saved log fail its check on the next load.
       if (!(v > 0)) return toast('Enter a weight above 0.');
+      if (ui.sheet.bodyweight) return saveBodyweight(v);
       return saveWeight(v);
     }
     if (v === null) return toast('Enter the weight first. Use 0 for body weight.');
@@ -2779,6 +3060,18 @@ document.addEventListener('change', (e) => {
     state.rest = value;
     rest.setMode(value);
     save();
+  } else if (name === 'plate') {
+    const owned = [...view.querySelectorAll('input[name="plate"]:checked')].map((c) => Number(c.value));
+    if (!owned.length) {
+      e.target.checked = true;
+      return toast('Keep at least one plate size.');
+    }
+    if (owned.length === PLATES[state.unit].length) delete state.platesOwned;
+    else state.platesOwned = owned;
+    save();
+  } else if (name === 'keyExpires') {
+    sync.setKeyExpires(isDay(value) ? value : null);
+    toast(isDay(value) ? `Saved. Train reminds you from ${shortDate(addDays(value, -KEY_WARN_DAYS))}.` : 'Expiry date cleared.');
   } else if (name === 'dots' && Object.hasOwn(DOTS, value)) {
     state.dots = value;
     save();
@@ -2853,8 +3146,51 @@ exerciseForm.elements.plates.addEventListener('change', (e) => {
 });
 
 setInterval(tickElapsed, 30000);
+
+// The day the page was drawn for. Back on screen on a later day (iOS can keep the app in memory overnight), it goes
+// back to Train on the day due, unless a sheet is open.
+let shownDay = todayISO();
+function newDay() {
+  if (todayISO() === shownDay) return;
+  shownDay = todayISO();
+  if (!state.blocks.length || document.querySelector('dialog[open]')) return;
+  Object.assign(ui, { tab: 'train', reviewing: false, week: null, open: undefined, extraOpen: undefined, missedLater: null });
+  render();
+  scrollTop();
+}
+
+// A new version: the service worker downloads it in the background and takes over once it has it all. The page
+// still runs the old code until it's loaded again, which happens the next time the app comes back on screen with
+// no sheet open and no rest running, or at once from Settings.
+async function checkUpdate() {
+  const n = (k) => Number(k.slice('wave-v'.length));
+  let newest;
+  try {
+    newest = (await caches.keys()).filter((k) => /^wave-v\d+$/.test(k)).sort((a, b) => n(b) - n(a))[0];
+  } catch {
+    return;
+  }
+  if (!newest || n(newest) <= n(VERSION) || newest === update) return;
+  update = newest;
+  document.getElementById('version')?.replaceWith(Object.assign(document.createElement('div'), { innerHTML: versionLine() }).firstElementChild);
+  toast(`Version ${n(newest)} is ready. It loads next time you come back to the app.`);
+}
+
+let worker = null;
+let lastCheck = 0;
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') tickElapsed();
+  if (document.visibilityState !== 'visible') return;
+  if (update && !document.querySelector('dialog[open]') && !rest.running()) {
+    location.reload();
+    return;
+  }
+  // iOS only looks for a new version when the app is opened fresh, so ask each time it's back (at most once a minute).
+  if (worker && Date.now() - lastCheck > 60000) {
+    lastCheck = Date.now();
+    worker.update().catch(() => {});
+  }
+  tickElapsed();
+  newDay();
 });
 
 restoreInput.addEventListener('change', () => {
@@ -2911,4 +3247,9 @@ sync.init({
   },
 });
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator) {
+  // The first worker taking over isn't an update; a later one is.
+  const hadWorker = Boolean(navigator.serviceWorker.controller);
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadWorker) checkUpdate(); });
+  navigator.serviceWorker.register('sw.js').then((reg) => { worker = reg; }).catch(() => {});
+}

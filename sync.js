@@ -66,6 +66,24 @@ export const getStatus = () => status;
 export const lastSynced = () => cfg.lastSynced ?? null;
 export const isConnected = () => Boolean(cfg.token);
 
+// The day the access key stops working, as GitHub showed it when the key was made. GitHub doesn't let a web page
+// read it, so the lifter enters it. Kept with the key, on this phone only.
+export const keyExpires = () => cfg.expires ?? null;
+export function setKeyExpires(day) {
+  if (!cfg.token) return;
+  if (day) cfg.expires = day;
+  else delete cfg.expires;
+  delete cfg.remindAfter;
+  store();
+}
+
+// The reminder that the key is running out can be put off a day at a time.
+export const keyRemindAfter = () => cfg.remindAfter ?? '';
+export function remindKeyAfter(day) {
+  cfg.remindAfter = day;
+  store();
+}
+
 class HttpError extends Error {
   constructor(res) {
     super(`GitHub answered ${res.status}`);
@@ -184,15 +202,14 @@ export function saveNow() {
   push();
 }
 
-// Checks the key, then reports what is already saved on GitHub so the app can offer to restore it.
-export async function connect(token) {
-  let remote;
+// Whether a key can open the repository and read its files: { ok, remote } with what's saved there, or { ok, message }.
+async function checkKey(token) {
   try {
     const repo = await request(token, '');
     if (!repo.ok) {
       return { ok: false, message: `That key can't open ${REPO}. Make sure it has Contents read and write access to that repository.` };
     }
-    remote = await readRemote(token);
+    return { ok: true, remote: await readRemote(token) };
   } catch (err) {
     // An HTTP error here means the key reached the repository but isn't allowed to read its files.
     if (err.status) {
@@ -200,11 +217,35 @@ export async function connect(token) {
     }
     return { ok: false, message: "Couldn't reach GitHub. Check your connection and try again." };
   }
-  cfg = { token, sha: remote?.sha ?? null, dirty: false, lastSynced: remote ? new Date().toISOString() : null };
+}
+
+// Checks the key, then reports what is already saved on GitHub so the app can offer to restore it. `expires` is
+// the day the key runs out, if it was entered.
+export async function connect(token, expires = null) {
+  const checked = await checkKey(token);
+  if (!checked.ok) return checked;
+  const { remote } = checked;
+  cfg = { token, sha: remote?.sha ?? null, dirty: false, lastSynced: remote ? new Date().toISOString() : null, ...(expires && { expires }) };
   store();
   setBase(remote?.state ? JSON.stringify(remote.state, null, 2) : null);
   setStatus('synced');
   return { ok: true, remote };
+}
+
+// Swaps in a new key for the same repository, for one running out or rejected. What this phone knows about the
+// saved log stays as it was, so nothing is loaded or overwritten; anything waiting to save goes with the new key.
+export async function rekey(token, expires = null) {
+  if (!cfg.token) return { ok: false, message: 'Connect to GitHub first.' };
+  const checked = await checkKey(token);
+  if (!checked.ok) return checked;
+  cfg.token = token;
+  delete cfg.expires;
+  delete cfg.remindAfter;
+  if (expires) cfg.expires = expires;
+  store();
+  if (cfg.dirty) push();
+  else setStatus('synced');
+  return { ok: true };
 }
 
 // Reads the log saved on GitHub so changes made away from this phone can be loaded onto it.

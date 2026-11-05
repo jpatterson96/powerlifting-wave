@@ -68,6 +68,13 @@ export const PLATES = {
   kg: [25, 20, 15, 10, 5, 2.5, 1.25],
 };
 
+// The plates the lifter has, heaviest first: every size unless some were turned off in Settings (`platesOwned`,
+// in the log's unit).
+export function plateSizes(state) {
+  const owned = state.platesOwned;
+  return Array.isArray(owned) && owned.length ? PLATES[state.unit].filter((p) => owned.includes(p)) : PLATES[state.unit];
+}
+
 export const ROUNDING = { lb: [5, 2.5], kg: [2.5, 5] };
 export const REST_MODES = ['sound', 'silent', 'off'];
 
@@ -220,6 +227,22 @@ export function singleWeight(block, session, week, state) {
   return single ? roundTo(workingMax(weekMax(block, session.lift, week, state), state) * single, state.round) : null;
 }
 
+// How a heavy day's sets moved, picked once they're all logged. Heavy days should leave 2-4 reps in the tank;
+// GRINDS grinds on one lift in a block say its max is set too high.
+export const FEELS = ['easy', 'smooth', 'grind'];
+export const GRINDS = 2;
+
+// The heavy days of one lift in a block (weeks 1-7) with a feel picked, counted by feel.
+export function heavyFeel(block, liftId) {
+  const count = { easy: 0, smooth: 0, grind: 0, days: 0 };
+  block.log.slice(0, FINISH_WEEK).flat().forEach((s) => {
+    if (s.lift !== liftId || s.kind !== 'heavy' || s.skipped || !FEELS.includes(s.feel)) return;
+    count[s.feel] += 1;
+    count.days += 1;
+  });
+  return count;
+}
+
 // Seconds of rest before the next set by lift and load: bench recovers fastest, deadlift slowest, and
 // test sets and re-max attempts get the most. Each is a minimum; add up to a minute after a slow set.
 const REST = {
@@ -235,13 +258,15 @@ export function restSeconds(session, week, nextSet) {
   return REST[session.lift][restBand(prescription(session.kind, week).pct)];
 }
 
-// Greedy works because each plate set is listed heaviest first and every size is loadable.
-// `bar` is what's loaded before any plates: a barbell by default, 0 for a plate-loaded machine.
-export function platesPerSide(total, unit, bar = BAR[unit]) {
+// Greedy works because each plate set is listed heaviest first and the smallest plate divides the rest. Without
+// the smallest, what's left over is left off, and the caller says what the plates make instead.
+// `bar` is what's loaded before any plates: a barbell by default, 0 for a plate-loaded machine. `sizes` is the
+// plates there are to load (see plateSizes).
+export function platesPerSide(total, unit, bar = BAR[unit], sizes = PLATES[unit]) {
   let side = (total - bar) / 2;
   const plates = [];
   if (side <= 0) return plates;
-  for (const p of PLATES[unit]) {
+  for (const p of sizes) {
     while (side >= p - 1e-9) {
       plates.push(p);
       side = tidy(side - p);
@@ -351,6 +376,45 @@ const dayNumber = (iso) => {
   const [y, m, d] = iso.split('-').map(Number);
   return Date.UTC(y, m - 1, d) / 86400000;
 };
+
+// The day of the week a date falls on, by name.
+export const weekdayOf = (iso) => DAYS[(dayNumber(iso) + 3) % 7];
+
+// Weeks counted Monday to Sunday, numbered from any fixed Monday.
+const calendarWeek = (iso) => Math.floor((dayNumber(iso) + 3) / 7);
+
+// The day to open on `today`: one already worked on today; else this weekday's day when it's still to do; else the
+// next day to train. Null once the block is done.
+// The schedule's days never move, so a missed Wednesday doesn't make Thursday's bench wait. Which week is this
+// calendar week comes from the latest day trained, counting on from its week, as long as it was trained on its own
+// day of the week; once days are done on other days (or nothing is trained yet, as when a block starts midweek), the
+// days just go in order. Never past the week after the next day to train.
+export function dueSession(block, today) {
+  const next = nextSession(block);
+  if (!next) return null;
+  let latest = null;
+  block.log.forEach((week, w) => week.forEach((s, index) => {
+    if (s.date && (!latest || s.date >= latest.s.date)) latest = { s, week: w, index };
+  }));
+  if (latest?.s.date === today) return { week: latest.week, index: latest.index };
+  if (!latest || weekdayOf(latest.s.date) !== latest.s.day) return next;
+  const w = latest.week + calendarWeek(today) - calendarWeek(latest.s.date);
+  if (w < next.week || w > next.week + 1 || w >= block.log.length) return next;
+  const day = weekdayOf(today);
+  const index = block.log[w].findIndex((s, i) => (w > next.week || i >= next.index) && s.day === day && !settled(s));
+  return index === -1 ? next : { week: w, index };
+}
+
+// Days passed over: never started or skipped, and before the day due today or a later day already trained. Each
+// is { week, index }, in order.
+export function missedSessions(block, today) {
+  const due = dueSession(block, today);
+  if (!due) return [];
+  const flat = block.log.flatMap((week, w) => week.map((s, index) => ({ s, week: w, index })));
+  const at = (p) => flat.findIndex((x) => x.week === p.week && x.index === p.index);
+  const limit = Math.max(at(due), ...flat.map((x, i) => (touched(x.s) ? i : -1)));
+  return flat.slice(0, limit).filter(({ s }) => !s.skipped && !s.date && !touched(s)).map(({ week, index }) => ({ week, index }));
+}
 
 // After two or more weeks off, the advice is to restart the block at week 1.
 export function longBreak(block, today) {
@@ -470,8 +534,10 @@ export function convertState(state, to) {
       ...s, weight: conv(s.weight), ...(s.weights && { weights: s.weights.map(conv) }), ...(s.extras && { extras: extras(s.extras) }),
     }))),
   }));
+  // The plates owned are sizes in the old unit; the new unit starts from every size.
+  const { platesOwned, ...rest } = state;
   return {
-    ...state, unit: to, round: ROUNDING[to][0], blocks,
+    ...rest, unit: to, round: ROUNDING[to][0], blocks,
     ...(state.exercises && { exercises: state.exercises.map((e) => (counted.has(e.id) ? e : { ...e, step: conv(e.step) })) }),
     ...(state.bodyweight && { bodyweight: state.bodyweight.map((e) => ({ ...e, weight: conv(e.weight) })) }),
     ...(state.imported && { imported: state.imported.map((w) => ({ ...w, extras: extras(w.extras) })) }),

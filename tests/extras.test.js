@@ -329,3 +329,25 @@ test('settings split the exercises by kind of day, and a move steps over the nex
   assert.equal(moveExercise(state, legs, -1), true);
   assert.deepEqual(state.exercises.map((e) => e.name), ['Fly', 'Leg press', 'Shoulder press', 'Row']);
 });
+
+test('warm-up ticks, how a heavy day moved and the plates owned are kept when they check out', () => {
+  const { state } = setup();
+  const [mon, , , thu] = state.blocks[0].log[0];
+  mon.warmups = ['2026-11-02T16:30:00.000Z', null, '2026-11-02T16:38:00.000Z'];
+  thu.feel = 'grind';
+  state.platesOwned = [45, 25, 10, 5, 2.5];
+  const clean = cleanExtras(upgrade(JSON.parse(JSON.stringify(state))));
+  assert.deepEqual(clean.blocks[0].log[0][0].warmups, mon.warmups);
+  assert.equal(clean.blocks[0].log[0][3].feel, 'grind');
+  assert.deepEqual(clean.platesOwned, [45, 25, 10, 5, 2.5]);
+  // Anything else is dropped, keeping the rest of the log.
+  Object.assign(mon, { warmups: ['yesterday'] });
+  Object.assign(thu, { feel: 'heavy' });
+  for (const owned of [[], [45, 30], 'all']) {
+    const bad = cleanExtras(upgrade(JSON.parse(JSON.stringify({ ...state, platesOwned: owned }))));
+    assert.equal(bad.platesOwned, undefined);
+    assert.equal(bad.blocks[0].log[0][0].warmups, undefined);
+    assert.equal(bad.blocks[0].log[0][3].feel, undefined);
+    assert.equal(bad.blocks[0].log[0][3].reps.length, 3);
+  }
+});

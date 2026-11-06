@@ -29,6 +29,13 @@ opener, or the taper week's heavy single), each with its plates a side. The firs
 starts the workout clock, like **Start workout**, and ticking the last step starts the rest timer before the first
 set (or the opener): the first set's rest, or 3 minutes after the taper week's heavy single.
 
+Once every day of a week is done or skipped, a card at the top of Train sums it up: days trained, sets, volume,
+time from Start to End workout, new accessory bests, and each day's top set marked with its feel on a heavy day,
+or with reps past or short of the plan. Grinds get a note with next week's heavy weights for that lift, and the
+test weeks (3 and 6) say what the test sets did to the maxes. The card stays on top of the next week until
+anything in it is done, or **Hide** is tapped; it's also there whenever the finished week is picked. **Sets per
+muscle** opens that week in History → Muscles. Week 8 gets the block review instead.
+
 ## The 8-week block
 
 | Week | Template days (Mon–Wed)            | Heavy days (Thu, Fri) |
@@ -46,6 +53,14 @@ Weeks 1–3 are the template's wave. Weeks 4–6 repeat it about 5% heavier with
 cuts volume about half at the same intensity (Pritchard et al. 2016; Travis et al. 2020).
 Week 8 alternates: re-max in blocks 1, 3, 5…, deload in blocks 2, 4, 6…. It can be switched on the
 week 8 screen before anything in it is logged, and is chosen for the next block on the review screen.
+
+**Finish block**, under week 8, opens the block review. It starts with the total the next block trains from and
+each lift's new max. Then a chart per lift shows how the max moved: the max trained from, the week 3 and 6 test
+sets' estimates, the re-max attempts made or missed, and why the new max is what it is. After that come every
+heavy day's feel; the block's sets, volume and average time a day, with a bar for each week; the days trained and
+skipped and the share of accessories done; the accessories that went up most and any that are stuck; and body
+weight from the block's first weigh-in to its last. The new maxes come last, ready to change, above **Start
+block**. The review is only there until the next block starts.
 
 **Settings → Work from** switches the percentages to a 90% training max, for when a max was a grind
 or the "2+" sets start coming up short. Re-max attempts always use the real max.
@@ -122,6 +137,20 @@ arrows put a day's exercises in the order you do them.
 - **Skip the rest** ends the day's accessories: anything not started is skipped, and anything stopped
   partway keeps just the sets you logged. A day also ends this way by itself once you log on a later
   day.
+- Skipping an accessory that leaves its muscle short for the week says so when you tap Skip (Undo is
+  on its line): "Your only direct work for glutes this week", or "Without it: back at 9 of 10 sets this
+  week". Short means under 10 sets (the low end of the shaded band in History → Muscles), or under what
+  the week's plan gives that muscle when that's less: two 3-set exercises make 6. The week counts what's
+  logged plus what's still to come, today and on the days left, so a skip that a later day covers says
+  nothing. The opened exercise shows the warning before you skip, and so does its closed line when you
+  skipped it last time or the muscle was short last week too; it turns red when it was skipped the last
+  2 times or more, or the muscle was short last week. It names the day's other exercises for that
+  muscle still to do. It's direct work only, because each exercise counts toward one muscle. Skipping
+  never asks first, and weeks 7 and 8 (light on purpose) don't warn. **Skip the rest** and **End
+  workout** name any muscle they leave short.
+- An exercise skipped 3 times running while its muscle's week stays on target is offered off that kind of
+  day in the day's summary (**Take it off bench days**). Its log stays, and Settings → Accessories adds
+  it back.
 - **Add a set** and **Remove a set** change today's sets only. Remove takes off the last set not
   done yet, or asks before removing a logged one.
 - Exercises with variants (e.g. *Dumbbell, Machine*) have a switch; each variant keeps its own

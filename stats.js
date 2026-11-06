@@ -1,11 +1,14 @@
 // The numbers behind History → Stats: strength for body weight, how fast each lift's record climbs, whether the
 // max matches the test sets, which days get trained or skipped, everything lifted, and which accessories are
-// moving or stuck. No DOM access here so it can be tested in Node.
+// moving or stuck; and behind the card a finished week gets on Train and the block review. No DOM access here so it
+// can be tested in Node.
 import {
-  LIFTS, FIRST_TEST, SECOND_TEST, LB_PER_KG, tidy, estimateMax, adjustMax, weekMax, setWeight, testResult, maxLifts,
-  liftRecord,
+  LIFTS, WAVE_TWO, FIRST_TEST, SECOND_TEST, FINISH_WEEK, LB_PER_KG, FEELS, tidy, estimateMax, adjustMax, weekMax, setWeight, testResult, maxLifts,
+  liftRecord, prescription,
 } from './logic.js';
-import { WEEKDAYS, isLightWeek, weightOf, loadOf, exerciseHistory, sessionBest, workoutTime } from './extras.js';
+import {
+  WEEKDAYS, isLightWeek, weightOf, loadOf, exerciseHistory, sessionBest, workoutTime, dayExtras, isNewBest,
+} from './extras.js';
 
 const dayNumber = (iso) => {
   const [y, m, d] = iso.split('-').map(Number);
@@ -204,6 +207,76 @@ export function totals(state) {
   return { all, blocks };
 }
 
+// ---------- A week ----------
+
+// One week of a block, for its card on Train: each day's top set (the heaviest weight, with the most reps done at
+// it), reps past and short of the prescription, and a heavy day's feel; the days trained and skipped; the week's
+// sets, weight × reps and time as totals counts them; how many accessories made a new best; and the accessories done
+// of those due on the days trained (the day's list now, plus any done or skipped that have since left it).
+export function weekSummary(state, blockIndex, week) {
+  const b = state.blocks[blockIndex];
+  const t = blank();
+  const dates = b.log[week].map((s) => s.date).filter(Boolean).sort();
+  const out = { from: dates[0] ?? null, to: dates[dates.length - 1] ?? null, days: [], trained: 0, skipped: 0, bests: 0, extrasDone: 0, extrasDue: 0 };
+  b.log[week].forEach((s, index) => {
+    if (s.skipped) {
+      out.skipped += 1;
+      out.days.push({ day: s.day, lift: s.lift, skipped: true });
+      return;
+    }
+    const target = prescription(s.kind, week).reps;
+    const main = s.reps.map((r, i) => (r === null ? null : { weight: setWeight(b, s, week, i, state), reps: r })).filter(Boolean);
+    const lifted = addSets(t, main);
+    if (addSets(t, extraSets(state, s.extras)) || lifted) out.trained += 1;
+    const time = workoutTime(s);
+    if (time?.ended) {
+      t.ms += time.total;
+      t.timed += 1;
+    }
+    const done = (s.extras ?? []).filter((x) => !x.skipped && x.sets.some(Boolean));
+    out.extrasDone += done.length;
+    out.extrasDue += new Set([...dayExtras(state, s).map((e) => e.id), ...(s.extras ?? []).map((x) => x.exercise)]).size;
+    out.bests += done.filter((x) => isNewBest(state, x.exercise, x.variant, [blockIndex, week, index], x.sets.filter(Boolean))).length;
+    const weight = main.length ? Math.max(...main.map((m) => m.weight)) : null;
+    out.days.push({
+      day: s.day,
+      lift: s.lift,
+      skipped: false,
+      top: weight === null ? null : { weight, reps: Math.max(...main.filter((m) => m.weight === weight).map((m) => m.reps)) },
+      over: main.reduce((sum, m) => sum + Math.max(0, m.reps - target), 0),
+      short: main.reduce((sum, m) => sum + Math.max(0, target - m.reps), 0),
+      feel: s.kind === 'heavy' && FEELS.includes(s.feel) ? s.feel : null,
+    });
+  });
+  return { ...out, sets: t.sets, volume: tidy(t.volume), ms: t.ms, timed: t.timed };
+}
+
+// ---------- A block ----------
+
+// A whole block for its review: each week as weekSummary has it, added up, and the first and last days trained.
+export function blockSummary(state, blockIndex) {
+  const weeks = state.blocks[blockIndex].log.map((_, w) => weekSummary(state, blockIndex, w));
+  const sum = (k) => weeks.reduce((n, w) => n + w[k], 0);
+  const dates = weeks.flatMap((w) => [w.from, w.to]).filter(Boolean).sort();
+  return {
+    from: dates[0] ?? null, to: dates[dates.length - 1] ?? null, weeks,
+    sets: sum('sets'), volume: tidy(sum('volume')), ms: sum('ms'), timed: sum('timed'), bests: sum('bests'),
+    extrasDone: sum('extrasDone'), extrasDue: sum('extrasDue'),
+  };
+}
+
+// How one lift's max moved through a block: the max weeks 1–3 trained from, the one week 3's test set left for
+// weeks 4–8, each test set logged, and the re-max attempts judged good or missed.
+export function maxPath(state, blockIndex, liftId) {
+  const b = state.blocks[blockIndex];
+  const tests = [FIRST_TEST, SECOND_TEST].map((week) => ({ week, test: testResult(b, liftId, week, state) }))
+    .filter((t) => t.test).map(({ week, test }) => ({ week, ...test }));
+  const remax = b.log[FINISH_WEEK].find((s) => s.lift === liftId && s.kind === 'max' && !s.skipped);
+  const attempts = (remax?.reps ?? []).map((rep, attempt) => (rep === null ? null
+    : { attempt, weight: setWeight(b, remax, FINISH_WEEK, attempt, state), good: rep === 1 })).filter(Boolean);
+  return { start: b.max[liftId], wave: weekMax(b, liftId, WAVE_TWO, state), tests, attempts };
+}
+
 // ---------- Accessories ----------
 
 // Sessions in a row without progress before an accessory counts as stuck.
@@ -227,11 +300,12 @@ function moved(before, after, e, unit) {
 // How each accessory is going, by variant, once it's been done twice: its best set's change from the first
 // session to the latest (estimated max, or reps for body-weight work), and `flat`, the latest sessions in a
 // row without progress counting the one they're measured from. The lighter weeks 7 and 8 repeat on purpose,
-// so they're left out.
-export function accessoryTrends(state) {
+// so they're left out. With `blockIndex`, only that block's sessions count.
+export function accessoryTrends(state, blockIndex = null) {
   const out = [];
   for (const e of state.exercises) {
-    const history = exerciseHistory(state, e.id).filter((h) => !(h.at && isLightWeek(h.at[1])));
+    const history = exerciseHistory(state, e.id)
+      .filter((h) => !(h.at && isLightWeek(h.at[1])) && (blockIndex === null || h.at?.[0] === blockIndex));
     for (const variant of [...new Set(history.map((h) => h.variant))]) {
       const of = history.filter((h) => h.variant === variant);
       if (of.length < 2) continue;

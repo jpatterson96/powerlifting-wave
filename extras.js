@@ -322,6 +322,95 @@ export function muscleSets(state, sessions) {
   return count;
 }
 
+// ---------- Skips that leave a muscle short ----------
+
+// A muscle's week falls short under 10 sets, the low end of a common weekly target for growth (History → Muscles
+// shades 10–20), or under what the plan gives it when that's less: two 3-set exercises make 6.
+export const MUSCLE_TARGET = 10;
+// Skipped this many times running while its muscle stays on target, an exercise is offered off its days.
+export const SKIPS_TO_DROP = 3;
+
+// The sets an accessory still has to come on a day: its unlogged sets, or the week's planned number when nothing
+// is recorded yet. None once it's skipped, or the day is skipped or ended.
+function setsToCome(session, exercise, week) {
+  if (session.skipped || session.ended) return 0;
+  const entry = entryOf(session, exercise.id);
+  if (!entry) return plannedSets(exercise, week);
+  return entry.skipped ? 0 : entry.sets.filter((s) => s === null).length;
+}
+
+// How each muscle's training week is going, as { sets, target }: `sets` is what's logged on every day plus the
+// sets still to come from day `from` on (earlier days are over), and `target` is MUSCLE_TARGET, or the plan's sets
+// for the muscle when fewer. A muscle not set, or Other, isn't counted.
+export function muscleOutlook(state, sessions, week, from) {
+  const out = new Map();
+  const add = (muscle, key, n) => {
+    if (!muscle || muscle === 'Other' || !n) return;
+    const m = out.get(muscle) ?? { sets: 0, plan: 0 };
+    m[key] += n;
+    out.set(muscle, m);
+  };
+  for (const [muscle, n] of muscleSets(state, sessions)) add(muscle, 'sets', n);
+  sessions.forEach((s, i) => {
+    const lift = LIFT_MUSCLE[s.lift];
+    add(lift, 'plan', s.reps.length);
+    for (const e of state.exercises) if (e.days.includes(s.day)) add(e.muscle, 'plan', plannedSets(e, week));
+    if (i < from) return;
+    if (!s.skipped && !s.ended) add(lift, 'sets', s.reps.filter((r) => r === null).length);
+    for (const e of dayExtras(state, s)) add(e.muscle, 'sets', setsToCome(s, e, week));
+  });
+  return new Map([...out].map(([muscle, { sets, plan }]) => [muscle, { sets, target: Math.min(MUSCLE_TARGET, plan) }]));
+}
+
+// How many times running an exercise was skipped before day `here`, over the days trained that had it.
+export function skipStreak(state, id, here) {
+  let streak = 0;
+  state.blocks.forEach((b, bi) => b.log.forEach((week, wi) => week.forEach((s, si) => {
+    const x = !s.skipped && before([bi, wi, si], here) ? entryOf(s, id) : null;
+    if (x?.skipped) streak++;
+    else if (x && done(x)) streak = 0;
+  })));
+  return streak;
+}
+
+// What skipping an accessory on day `here` ([block, week, day]) does to its muscle's week, or null when the week
+// stays on target without it, or it's a lighter week (7 and 8 are light on purpose). `from` is the week's first day
+// still to come. It gives the sets the muscle ends the week on without it, how many of them are done already, the
+// day's other exercises for the muscle still to come, the times running it was skipped before, and last week's
+// sets when they fell short too.
+export function skipConcern(state, here, exercise, from = here[2]) {
+  const [bi, week, index] = here;
+  const muscle = exercise.muscle;
+  if (isLightWeek(week) || !muscle || muscle === 'Other') return null;
+  const sessions = state.blocks[bi].log[week];
+  const session = sessions[index];
+  const { sets, target } = muscleOutlook(state, sessions, week, Math.min(from, index)).get(muscle) ?? { sets: 0, target: 0 };
+  const without = sets - setsToCome(session, exercise, week);
+  if (without >= target) return null;
+  const others = dayExtras(state, session).filter((e) => e !== exercise && e.muscle === muscle && setsToCome(session, e, week) > 0);
+  const prev = week > 0 && !isLightWeek(week - 1) ? muscleSets(state, state.blocks[bi].log[week - 1]).get(muscle) ?? 0 : null;
+  return {
+    muscle, sets: without, target, done: muscleSets(state, sessions).get(muscle) ?? 0, others,
+    streak: skipStreak(state, exercise.id, here), lastWeek: prev !== null && prev < target ? prev : null,
+  };
+}
+
+// The exercises on day `here`'s list skipped there for at least the SKIPS_TO_DROP-th time running while their
+// muscle's week stays on target, each with the times running, to offer taking them off that kind of day. None in
+// a lighter week.
+export function dropOffers(state, here, from = here[2]) {
+  const [bi, week, index] = here;
+  if (isLightWeek(week)) return [];
+  const sessions = state.blocks[bi].log[week];
+  const session = sessions[index];
+  const outlook = muscleOutlook(state, sessions, week, Math.min(from, index));
+  const short = (muscle) => Boolean(outlook.get(muscle)) && outlook.get(muscle).sets < outlook.get(muscle).target;
+  return state.exercises
+    .filter((e) => e.days.includes(session.day) && entryOf(session, e.id)?.skipped && !short(e.muscle))
+    .map((exercise) => ({ exercise, times: skipStreak(state, exercise.id, here) + 1 }))
+    .filter((d) => d.times >= SKIPS_TO_DROP);
+}
+
 // ---------- Workout timing ----------
 
 const byTime = (a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0);

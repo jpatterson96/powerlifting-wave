@@ -1,14 +1,16 @@
 import {
-  LIFTS, WEEKS, BLOCK_WEEKS, WAVE_TWO, FIRST_TEST, FINISH_WEEK, ATTEMPTS, ATTEMPT_NAMES, REMAX_RAMP, BUMPS, isTestSet,
+  LIFTS, WEEKS, BLOCK_WEEKS, WAVE_TWO, FIRST_TEST, SECOND_TEST, FINISH_WEEK, ATTEMPTS, ATTEMPT_NAMES, REMAX_RAMP, BUMPS, isTestSet,
   prescription, ROUNDING, REST_MODES, BAR, tidy, roundTo, workingMax, targetWeight, estimateMax, weekMax, attemptBase, attemptWeight, setWeight,
   singleWeight, restSeconds, platesPerSide, warmups, emptyState, newBlock, finishFor, setFinish, sessionStatus,
   weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak, restartBlock, evaluateLift, liftHistory,
   maxChanges, liftRecord, convertState, upgrade, PLATES, plateSizes, dueSession, missedSessions, FEELS, GRINDS, heavyFeel,
+  touched, testResult,
 } from './logic.js';
 import {
   WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, SMALL_PLATES, isCounted, countedPlates, weightOf, loadOf, PLATES_UP_TO, GUESSED_STEP, looksCounted, countInPlates, isLightWeek, plannedSets, newExercise,
   dayExtras, dayGroups, exercisesByDay, moveExercise, setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, earlierTimes, isNewBest, defaultVariant,
   suggestion, sessionBest, records, muscleSets, workoutTime, timedSessions, partTimes, logBodyweight, cleanExtras,
+  DAY_KINDS, muscleOutlook, skipConcern, dropOffers,
 } from './extras.js';
 import { mergeLogs } from './merge.js';
 import { DECIMALS, press, typed, nudge } from './pad.js';
@@ -17,11 +19,14 @@ import { SHOW, PR_SHOW, showPlan, prShow, stepAt } from './show.js';
 import * as sync from './sync.js';
 import * as rest from './rest.js';
 import { maxChart, volumeChart, progressChart, sparkline } from './charts.js';
-import { DOTS, STUCK_AFTER, strength, gains, maxChecks, nextTest, testBands, consistency, totals, accessoryTrends } from './stats.js';
+import {
+  DOTS, STUCK_AFTER, strength, gains, maxChecks, nextTest, testBands, consistency, totals, accessoryTrends, weekSummary,
+  blockSummary, maxPath,
+} from './stats.js';
 
 const KEY = 'powerlifting-wave';
 // The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
-const VERSION = 'wave-v21';
+const VERSION = 'wave-v22';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -482,6 +487,7 @@ function trainView() {
       <p class="top-meta">Started ${shortDate(b.started)}</p>
     </header>
     ${notice(b)}
+    ${weekCard(b)}
     ${waveNav(b)}
     <p class="week-line"><span class="week-count">Week ${ui.week + 1} of ${BLOCK_WEEKS}</span> <span class="week-title">${weekName(b, ui.week)}</span></p>
     ${dayTabs(b, next, missed)}
@@ -495,6 +501,128 @@ function trainView() {
       <button class="btn btn-wide" data-action="review" data-key="review">Finish block</button>
       <p class="hint">See how the block went and set your maxes for block ${n + 1}.</p>
     </div>` : ''}`;
+}
+
+// ---------- The week's card ----------
+// A finished week's numbers at the top of Train: while that week is shown, and on the next week until anything in
+// it is done or Hide is tapped (remembered on this phone only). Week 8 has the block review instead.
+
+const WEEK_HIDDEN = 'powerlifting-wave-week-hidden';
+const weekId = (b, week) => `${b.started} ${week}`;
+
+function hiddenWeek() {
+  try {
+    return localStorage.getItem(WEEK_HIDDEN);
+  } catch {
+    return null;
+  }
+}
+
+// The week the card is for, and whether it can be hidden; null when there's no card.
+function cardWeek(b) {
+  const done = (w) => w >= 0 && w < FINISH_WEEK && weekProgress(b, w) === 1;
+  if (done(ui.week)) return { week: ui.week, hide: false };
+  const prev = ui.week - 1;
+  if (!done(prev) || b.log[ui.week].some((s) => touched(s) || s.started) || hiddenWeek() === weekId(b, prev)) return null;
+  return { week: prev, hide: true };
+}
+
+// "Nov 2 – 6" within a month of this year, else both dates in full.
+function dateSpan(from, to) {
+  if (from === to) return shortDate(from);
+  const compact = from.slice(0, 7) === to.slice(0, 7) && Number(from.slice(0, 4)) === new Date().getFullYear();
+  return `${shortDate(from)} – ${compact ? Number(to.slice(8)) : shortDate(to)}`;
+}
+
+// "51 min", "2 h 53".
+const spanShort = (ms) => {
+  const m = Math.round(ms / 60000);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+};
+
+const FEEL_CHIP = { easy: 'is-up', smooth: '', grind: 'is-down' };
+
+// A day's mark under its top set: the feel picked on a heavy day, else reps short of or past the prescription.
+function dayChip(d) {
+  if (d.skipped) return '<span class="recap-chip">Skipped</span>';
+  if (d.feel) return `<span class="recap-chip ${FEEL_CHIP[d.feel]}">${FEEL_TEXT[d.feel][0]}</span>`;
+  if (d.short) return `<span class="recap-chip is-down" aria-label="${plural(d.short, 'rep')} short">−${d.short}</span>`;
+  if (d.over) return `<span class="recap-chip is-up" aria-label="${plural(d.over, 'rep')} extra">+${d.over}</span>`;
+  return '';
+}
+
+// What a finished week says to keep an eye on: heavy days that were a grind, and what a test week did to the maxes.
+function weekWatch(b, week, w) {
+  const notes = [];
+  const names = (lifts) => listDays(lifts.map((l) => l.short.toLowerCase()));
+  // In the week's order: bench before squat.
+  const ground = [...new Set(w.days.filter((d) => d.feel === 'grind').map((d) => d.lift))].map((id) => LIFTS.find((l) => l.id === id));
+  const many = ground.filter((l) => heavyFeel(b, l.id).grind >= GRINDS);
+  const once = ground.filter((l) => !many.includes(l));
+  if (many.length) {
+    notes.push({
+      down: true,
+      title: many.length === 1 ? `${plural(heavyFeel(b, many[0].id).grind, 'grind')} on heavy ${names(many)} days` : `${GRINDS} or more grinds each on ${names(many)}`,
+      text: state.trainingMax
+        ? `Already on a 90% training max, so lower ${many.length === 1 ? 'that max' : 'those maxes'} in Settings → Current maxes.`
+        : `That's a max set too high. Use a 90% training max in Settings → Work from, or lower it in Settings → Current maxes.`,
+    });
+  }
+  if (once.length) {
+    const next = week + 1 < FINISH_WEEK ? b.log[week + 1].filter((s) => s.kind === 'heavy' && once.some((l) => l.id === s.lift)) : [];
+    const ahead = next.map((s) => `${s.day.slice(0, 3)} ${liftOf(s).short.toLowerCase()} ${fmt(setWeight(b, s, week + 1, 0, state))}`);
+    notes.push({
+      down: true,
+      title: `${capital(names(once))} ground once${once.length > 1 ? ' each' : ''}`,
+      text: `A second grind this block says that max is set too high.${ahead.length ? ` Next week's heavy days: ${ahead.join(', ')}.` : ''}`,
+    });
+  }
+  const tested = LIFTS.map((l) => ({ l, t: testResult(b, l.id, week, state) })).filter((x) => x.t);
+  if (week === FIRST_TEST && tested.length) {
+    const said = tested.map(({ l }) => {
+      const was = b.max[l.id];
+      const next = weekMax(b, l.id, WAVE_TWO, state);
+      return `${l.short.toLowerCase()} ${fmt(next)}${next === was ? '' : ` (${signed(next - was)})`}`;
+    });
+    notes.push({ title: 'Maxes for weeks 4–8', text: `${capital(said.join(', '))}.` });
+  } else if (week === SECOND_TEST && tested.length) {
+    const said = tested.map(({ l, t }) => `${l.short.toLowerCase()} ${fmt(Math.round(t.estimate))}`);
+    notes.push({ title: 'Week 6 estimates', text: `${capital(said.join(', '))}. ${b.finish === 'remax' ? 'Your re-max attempts build from them.' : 'They set next block’s maxes.'}` });
+  }
+  return notes.map((n) => `<p class="recap-watch${n.down ? ' is-down' : ''}"><strong>${n.title}</strong><span>${n.text}</span></p>`).join('');
+}
+
+function weekCard(b) {
+  const at = cardWeek(b);
+  if (!at) return '';
+  const { week, hide } = at;
+  const w = weekSummary(state, state.blocks.length - 1, week);
+  if (!w.trained) return '';
+  const days = w.days.map((d) => `<li class="${d.feel === 'grind' || d.short ? 'is-down' : ''}${d.skipped ? 'is-skipped' : ''}">
+      <span class="recap-day">${d.day.slice(0, 3)}</span>
+      <span class="recap-top">${d.top ? `${fmt(d.top.weight)}×${d.top.reps}` : '–'}</span>
+      <span class="recap-lift">${LIFTS.find((l) => l.id === d.lift).short}</span>
+      ${dayChip(d)}
+    </li>`).join('');
+  return `<section class="recap" aria-label="Week ${week + 1} summary" data-key="recap">
+    <div class="recap-head">
+      <h2 class="recap-title">Week ${week + 1} done</h2>
+      ${hide ? `<button class="btn-quiet recap-hide" data-action="week-hide" data-week="${week}">Hide</button>` : ''}
+    </div>
+    <p class="recap-meta">${w.from ? `${dateSpan(w.from, w.to)} · ` : ''}${weekName(b, week)} · ${w.trained} of ${plural(b.log[week].length, 'day')}</p>
+    <dl class="stats">
+      <div><dt>Sets</dt><dd>${w.sets}</dd></div>
+      <div><dt>Volume</dt><dd>${Math.round(w.volume).toLocaleString()}</dd></div>
+      ${w.timed ? `<div><dt>Timed</dt><dd>${spanShort(w.ms)}</dd></div>` : ''}
+      ${w.bests ? `<div><dt>Bests</dt><dd>${w.bests}</dd></div>` : ''}
+    </dl>
+    <ul class="recap-days" style="--n:${w.days.length}" aria-label="Top set each day">${days}</ul>
+    ${weekWatch(b, week, w)}
+    <div class="recap-foot">
+      ${w.extrasDue ? `<p class="hint">${w.extrasDone} of ${plural(w.extrasDue, 'accessory')} done.</p>` : ''}
+      <button class="btn-line" data-action="week-muscles" data-week="${week}">Sets per muscle</button>
+    </div>
+  </section>`;
 }
 
 function waveNav(b) {
@@ -754,9 +882,62 @@ function openGroup(session, groups, tapped = ui.extraOpen) {
 // Today's sets once anything is recorded, so sets added or removed today stick; else the week's planned number.
 const setCount = (e, entry) => entry?.sets.length ?? plannedSets(e, ui.week);
 
-// One exercise's line in the list: name, a light per set, and either today's sets or last time's.
-function rowLine(session, i, e) {
+// ---------- Skips that leave a muscle short ----------
+
+// The first day of the week on view still to come: the day due today when it's in this week, the first day when
+// that's in a later week (looking ahead), and none when the week is behind it.
+function weekFrom() {
+  const due = dueSession(block(), todayISO());
+  if (!due || due.week > ui.week) return Infinity;
+  return due.week < ui.week ? 0 : due.index;
+}
+
+// What skipping an accessory would leave its muscle's week at (extras.js skipConcern), while it can still be
+// skipped: nothing logged and not skipped yet.
+function concernFor(session, i, e) {
+  const entry = entryOf(session, e.id);
+  if (entry?.skipped || entry?.sets.some(Boolean)) return null;
+  return skipConcern(state, here(i), e, weekFrom());
+}
+
+// It says "direct" because each exercise counts toward one muscle: a squat does nothing for glutes here.
+function concernText(c) {
+  const m = c.muscle.toLowerCase();
+  const head = c.sets > c.done ? `Without it: ${m} at ${c.sets} of ${c.target} sets this week.`
+    : c.done ? `The last direct work for ${m} this week: ${c.done} of ${c.target} sets without it.`
+      : `Your only direct work for ${m} this week.`;
+  const streak = c.streak > 1 ? ` Skipped the last ${c.streak} times.` : c.streak ? ' Skipped last time too.' : '';
+  const lastWeek = c.lastWeek === null ? '' : ` Short last week too: ${c.lastWeek} of ${c.target}.`;
+  const others = c.others.length ? ` ${listDays(c.others.map((e) => e.name))} ${c.others.length > 1 ? 'are' : 'is'} still left today.` : '';
+  return `${head}${streak}${lastWeek}${others}`;
+}
+
+// A skip that keeps happening, or a muscle short two weeks running, is marked stronger.
+const concernHTML = (c, tag = 'span') => (c
+  ? `<${tag} class="skip-warn${c.streak > 1 || c.lastWeek !== null ? ' is-strong' : ''}">${esc(concernText(c))}</${tag}>` : '');
+
+// A closed line warns only when the exercise was skipped last time or its muscle was short last week too. Any
+// other skip that leaves the week short says so when it's tapped, or in the opened exercise, so a week with a
+// 6-set muscle doesn't light up every line of exercises that get done anyway.
+const closedConcern = (c) => (c && (c.streak > 0 || c.lastWeek !== null) ? c : null);
+
+// What's left of a day, before Skip the rest or End workout skips it.
+const unfinished = (session) => dayExtras(state, session).filter((e) => !isFinished(entryOf(session, e.id)));
+
+// Once those are skipped: the muscles among them that end the week short, as a sentence, or '' when none do.
+function shortWeekText(i, skipped) {
+  if (isLightWeek(ui.week)) return '';
+  const outlook = muscleOutlook(state, block().log[ui.week], ui.week, Math.min(weekFrom(), i));
+  const short = [...new Set(skipped.map((e) => e.muscle))].filter((m) => outlook.get(m) && outlook.get(m).sets < outlook.get(m).target);
+  if (!short.length) return '';
+  return ` Short this week: ${short.map((m) => `${m.toLowerCase()} ${outlook.get(m).sets} of ${outlook.get(m).target}`).join(', ')} sets.`;
+}
+
+// One exercise's line in the list: name, a light per set, either today's sets or last time's, and what skipping it
+// would do to its muscle's week when that falls short (on a closed line, see closedConcern).
+function rowLine(session, i, e, open = false) {
   const { entry, variant, last } = extraPlan(session, i, e);
+  const concern = concernFor(session, i, e);
   const range = `${plannedSets(e, ui.week)} × ${e.low}–${e.high}`;
   const done = entry?.sets.filter(Boolean) ?? [];
   const count = setCount(e, entry);
@@ -768,6 +949,7 @@ function rowLine(session, i, e) {
     <span class="row-name">${esc(e.name)}${variant ? ` <span class="row-variant">${esc(variant)}</span>` : ''}</span>
     <span class="row-dots" aria-hidden="true">${dots}</span>
     <span class="row-sum">${summary}</span>
+    ${concernHTML(open ? concern : closedConcern(concern))}
   </span>`;
 }
 
@@ -788,7 +970,7 @@ function groupView(session, i, group, open) {
     const next = supersetOrder(counts).find(({ which, set }) => !all[which]?.sets[set]);
     heading = toggle(`${picHTML(group[0])}<span class="round-line">${next ? `Round ${next.set + 1} of ${Math.max(...counts)}` : 'Every round done'}: ${group.map((e) => esc(e.name)).join(' + ')}</span>`, key);
   } else if (open) {
-    heading = toggle(rowLine(session, i, group[0]), key);
+    heading = toggle(rowLine(session, i, group[0], true), key);
   }
   return `<li class="extra${pair ? ' is-superset' : ''}${open ? ' is-open' : ''}" data-status="${status}">
     <div class="extra-top">
@@ -846,6 +1028,14 @@ function daySummary(b, session, i) {
     const top = sessionBest(x.sets, x.e, state.unit);
     return `${esc(x.e.name)}${x.entry.variant ? ` (${esc(x.entry.variant)})` : ''}, ${top.kind === 'reps' ? plural(top.value, 'rep') : `est. max ${estText(x.e, top.value)}`}`;
   });
+  // On the day itself: exercises skipped time after time while their muscle's week stays on target, offered off
+  // this kind of day.
+  const drops = session.date === todayISO() ? dropOffers(state, here(i), weekFrom()) : [];
+  const kind = drops.length ? kindName(DAY_KINDS.find((k) => k.days.includes(session.day))).toLowerCase() : '';
+  const dropList = drops.map(({ exercise: e, times }) => `<li>
+      <span>${esc(e.name)}, skipped ${times} times running.</span>
+      <button class="btn-quiet summary-drop" data-action="extra-drop" data-index="${i}" data-exercise="${e.id}" data-key="extra-drop-${e.id}">Take it off ${kind}</button>
+    </li>`).join('');
   return `<section class="day-summary" aria-label="Workout summary">
     <h3 class="summary-title">Workout done${session.date ? `, ${shortDate(session.date)}` : ''}</h3>
     <dl class="summary-list">
@@ -854,6 +1044,7 @@ function daySummary(b, session, i) {
       <div><dt>Volume</dt><dd>${Math.round(volume).toLocaleString()} ${state.unit}</dd></div>
       ${bests.length ? `<div><dt>New bests</dt><dd>${bests.join('<br>')}</dd></div>` : ''}
       ${session.started ? timeSummary(session) : ''}
+      ${drops.length ? `<div><dt>Often skipped</dt><dd><ul class="summary-drops">${dropList}</ul></dd></div>` : ''}
     </dl>
   </section>`;
 }
@@ -923,8 +1114,10 @@ function extraDetail(session, i, e, named) {
   const chip = e.variants.length > 1
     ? `<button class="chip" data-action="extra-variant" ${ids} data-key="extra-variant-${i}-${e.id}" aria-label="${esc(e.name)} variant: ${esc(variant)}. Change">${esc(variant)}</button>`
     : e.variants.length ? `<span class="chip is-static">${esc(variant)}</span>` : '';
+  // A single exercise's warning is on its line above; a superset's heading is the round, so each half has its own.
   return `<div class="extra-detail">
     ${named || chip ? `<div class="extra-head">${name}${chip}</div>` : ''}
+    ${named ? concernHTML(concernFor(session, i, e), 'p') : ''}
     <p class="extra-note">${note}</p>
     <div class="sets extra-sets" role="group" aria-label="${esc(e.name)} sets">${lights}</div>
     ${plates ? `<p class="extra-plates">${plates}</p>` : ''}
@@ -1318,35 +1511,36 @@ function reviewReason(r, liftId) {
   }
 }
 
-// How the block's heavy days of a lift felt, where any were rated.
-function reviewFeel(b, lift) {
-  const feel = heavyFeel(b, lift.id);
-  if (!feel.days) return '';
-  const counts = FEELS.filter((f) => feel[f]).map((f) => (f === 'grind' ? plural(feel[f], 'grind') : `${feel[f]} ${FEEL_TEXT[f][0].toLowerCase()}`));
-  const advice = feel.grind < GRINDS ? ''
-    : state.trainingMax ? ' That many grinds on a 90% training max says to take this max down.'
-      : ' That many grinds says the max was set too high: take this one down, or switch to a 90% training max in Settings → Work from.';
-  return `<p class="hint">Heavy days: ${listDays(counts)}.${advice}</p>`;
-}
+// ---------- The block review ----------
+// Finish block: how the block went, then the maxes to start the next one from.
 
 function reviewView() {
   const b = block();
   const n = state.blocks.length;
+  const results = LIFTS.map((l) => ({ l, r: evaluateLift(b, l.id, state) }));
+  const total = {
+    was: tidy(results.reduce((sum, { l }) => sum + b.max[l.id], 0)),
+    now: tidy(results.reduce((sum, { r }) => sum + r.suggested, 0)),
+  };
+  const sum = blockSummary(state, n - 1);
+  const c = consistency(state);
+  const meta = [sum.from && dateSpan(sum.from, sum.to), plural(BLOCK_WEEKS, 'week'), `${c.trained} of ${plural(c.trained + c.skipped + c.toGo, 'day')}`];
   return `<header class="top">
       <button class="btn-quiet back" data-action="review-back">Back to week ${b.log.length}</button>
-      <h1 class="display">Finish block ${n}</h1>
+      <h1 class="display">${weekProgress(b, FINISH_WEEK) === 1 ? `Block ${n} done` : `Finish block ${n}`}</h1>
+      <p class="top-meta">${meta.filter(Boolean).join(' · ')}</p>
     </header>
-    <p class="lede">These are your maxes for block ${n + 1}. Change any number before you start.</p>
+    ${reviewTotal(results, total, n)}
+    ${reviewMaxes(b, results)}
+    ${reviewHeavy(b, n)}
+    ${reviewWork(sum)}
+    ${reviewShowingUp(b, c, sum)}
+    ${reviewExtras(n, sum)}
+    ${reviewBody(b, total, n)}
     <form class="review" id="review-form" novalidate>
-      ${LIFTS.map((l) => {
-        const result = evaluateLift(b, l.id, state);
-        return `<section class="review-lift">
-          <h2 class="lift-name">${l.name}</h2>
-          <p class="review-why${result.change > 0 ? '' : ' is-held'}">${reviewReason(result, l.id)}</p>
-          ${reviewFeel(b, l)}
-          ${maxField({ ...l, name: `New max, was ${fmt(b.max[l.id])}` }, fmt(result.suggested))}
-        </section>`;
-      }).join('')}
+      <h2 class="chart-title">Block ${n + 1}</h2>
+      <p class="hint">Your new maxes. Change any number before you start.</p>
+      ${results.map(({ l, r }) => maxField({ ...l, name: `${l.name}, was ${fmt(b.max[l.id])}` }, fmt(r.suggested))).join('')}
       <fieldset class="review-lift">
         <legend class="setting-title">Week 8 of block ${n + 1}</legend>
         ${segmented('finish', [{ value: 'remax', label: 'Re-max' }, { value: 'deload', label: 'Deload' }], finishFor(n))}
@@ -1354,6 +1548,197 @@ function reviewView() {
       </fieldset>
       <button class="btn btn-wide" type="submit">Start block ${n + 1}</button>
     </form>`;
+}
+
+const changeClass = (n) => (n > 0 ? 'is-up' : n < 0 ? 'is-down' : '');
+const changeText = (n) => (n ? signed(n) : 'Same');
+
+// The total the next block starts from, against this one's, and each lift's new max.
+function reviewTotal(results, total, n) {
+  const tiles = results.map(({ l, r }) => `<li class="stat-tile">
+      <span class="stat-tile-label">${l.short}</span>
+      <span class="stat-tile-num">${fmt(r.suggested)}</span>
+      <span class="review-change ${changeClass(r.change)}">${changeText(r.change)}</span>
+    </li>`).join('');
+  const by = tidy(total.now - total.was);
+  return `<section class="review-hero" aria-label="Your maxes for block ${n + 1}">
+    <p class="review-hero-label">Total for block ${n + 1}</p>
+    <p class="review-total"><span class="show-digits">${big(total.now)}</span>
+      <span class="review-total-change"><span class="review-change ${changeClass(by)}">${changeText(by)}</span><span class="review-was">from ${big(total.was)}</span></span></p>
+    <ul class="stat-tiles">${tiles}</ul>
+  </section>`;
+}
+
+// Each lift through the block: the max trained from, the test sets' estimates, the re-max attempts and the new max,
+// with why the new max is what it is.
+function reviewMaxes(b, results) {
+  const paths = results.map(({ l, r }) => ({ l, r, path: maxPath(state, state.blocks.length - 1, l.id) }));
+  const attempt = (a) => `<li class="${a.good ? '' : 'is-miss'}">${ATTEMPT_NAMES[a.attempt]} <b>${fmt(a.weight)}</b>
+    <span aria-hidden="true">${a.good ? '✓' : '✕'}</span><span class="sr-only">${a.good ? 'good lift' : 'no lift'}</span></li>`;
+  const lifts = paths.map(({ l, r, path }) => `<li class="review-path">
+      <p class="review-path-head"><span class="review-path-name">${l.name}</span>
+        <span class="review-path-new">${fmt(b.max[l.id])} → ${fmt(r.suggested)}${r.change ? `<small class="review-change ${changeClass(r.change)}">${signed(r.change)}</small>` : ''}</span></p>
+      ${pathChart(l, path, r)}
+      ${path.attempts.length ? `<ul class="review-attempts">${path.attempts.map(attempt).join('')}</ul>` : ''}
+      <p class="review-why${r.change > 0 ? '' : ' is-held'}">${reviewReason(r, l.id)}</p>
+    </li>`).join('');
+  const all = paths.map((p) => p.path);
+  const legend = [
+    '<span><i class="is-from"></i>Max trained from</span>',
+    all.some((p) => p.tests.length) && '<span><i class="is-test"></i>Test set estimate</span>',
+    all.some((p) => p.attempts.some((a) => a.good)) && '<span><i class="is-good"></i>Good lift</span>',
+    all.some((p) => p.attempts.some((a) => !a.good)) && '<span><i class="is-miss"></i>No lift</span>',
+  ].filter(Boolean).join('');
+  return `<section class="chart-block">
+    <h2 class="chart-title">How each max moved</h2>
+    <ul class="review-paths">${lifts}</ul>
+    <p class="review-legend" aria-hidden="true">${legend}</p>
+  </section>`;
+}
+
+// One lift's max across the weeks: a step line for the max trained from (week 3's test set moves it from week 4 on),
+// a dot for each test set's estimate, the re-max attempts in week 8, and the new max at the right.
+function pathChart(l, path, r) {
+  const W = 350;
+  const H = 112;
+  const left = 6;
+  const right = 50;
+  const top = 14;
+  const bottom = 22;
+  const slot = (W - left - right) / BLOCK_WEEKS;
+  const edge = (w) => left + slot * w;
+  const mid = (w) => edge(w + 0.5);
+  const values = [path.start, path.wave, ...path.tests.map((t) => t.estimate), ...path.attempts.map((a) => a.weight), r.suggested];
+  const lo = Math.min(...values) - 8;
+  const hi = Math.max(...values) + 8;
+  const y = (v) => top + (1 - (v - lo) / (hi - lo)) * (H - top - bottom);
+  const tone = r.change > 0 ? 'var(--gain)' : r.change < 0 ? 'var(--red-text)' : 'var(--chalk)';
+  const tests = path.tests.map((t) => `<circle cx="${mid(t.week)}" cy="${y(t.estimate)}" r="5" fill="var(--series-1)"/>
+      <text class="review-chart-v" x="${mid(t.week)}" y="${y(t.estimate) - 9}" text-anchor="middle">${fmt(Math.round(t.estimate))}</text>`).join('');
+  const attempts = path.attempts.map((a) => {
+    const cx = mid(FINISH_WEEK) + (a.attempt - 1) * 11;
+    return a.good ? `<circle cx="${cx}" cy="${y(a.weight)}" r="4.5" fill="var(--chalk)"/>`
+      : `<circle cx="${cx}" cy="${y(a.weight)}" r="4" fill="none" stroke="var(--red)" stroke-width="2"/>`;
+  }).join('');
+  const weeks = Array.from({ length: BLOCK_WEEKS }, (_, w) => `<text x="${mid(w)}" y="${H - 4}" text-anchor="middle">${w + 1}</text>`).join('');
+  const said = [
+    `trained from ${fmt(path.start)}${path.wave === path.start ? '' : `, then ${fmt(path.wave)} from week ${WAVE_TWO + 1}`}`,
+    path.tests.length && `test sets estimated ${listDays(path.tests.map((t) => fmt(Math.round(t.estimate))))}`,
+    `new max ${fmt(r.suggested)}`,
+  ].filter(Boolean).join('; ');
+  return `<svg class="review-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${l.name}: ${said}.">
+      <rect x="${edge(FINISH_WEEK)}" y="${top - 6}" width="${slot}" height="${H - top - bottom + 12}" rx="6" fill="var(--surface)"/>
+      <path d="M${edge(0)},${y(path.start)} H${edge(WAVE_TWO)} V${y(path.wave)} H${edge(BLOCK_WEEKS)}" fill="none" stroke="var(--steel)" stroke-width="2.5"/>
+      <text x="${edge(0) + 2}" y="${y(path.start) - 6}">${fmt(path.start)}</text>
+      ${path.wave === path.start ? '' : `<text x="${edge(WAVE_TWO) + 4}" y="${y(path.wave) - 6}">${fmt(path.wave)}</text>`}
+      ${tests}${attempts}
+      <line x1="${mid(FINISH_WEEK) + 16}" x2="${W - right + 4}" y1="${y(r.suggested)}" y2="${y(r.suggested)}" stroke="${tone}" stroke-width="1.5" stroke-dasharray="3 3"/>
+      <text class="review-chart-v is-new" x="${W - right + 8}" y="${y(r.suggested) + 5}" style="fill:${tone}">${fmt(r.suggested)}</text>
+      ${weeks}
+    </svg>`;
+}
+
+const FEEL_LETTER = { easy: 'E', smooth: 'S', grind: 'G' };
+
+// Every heavy day of the block, weeks 1–7, by how its sets moved.
+function reviewHeavy(b, n) {
+  const rows = LIFTS.map((l) => ({ l, feel: heavyFeel(b, l.id) })).filter((x) => x.feel.days);
+  if (!rows.length) return '';
+  const list = rows.map(({ l, feel }) => {
+    const days = b.log.slice(0, FINISH_WEEK).map((week) => {
+      const s = week.find((x) => x.lift === l.id && x.kind === 'heavy');
+      const f = s && !s.skipped && FEELS.includes(s.feel) ? s.feel : null;
+      return f ? `<i class="is-${f}">${FEEL_LETTER[f]}</i>` : '<i class="is-none">–</i>';
+    }).join('');
+    const counts = FEELS.filter((f) => feel[f]).map((f) => (f === 'grind' ? plural(feel[f], 'grind') : `${feel[f]} ${FEEL_TEXT[f][0].toLowerCase()}`));
+    return `<li>
+      <span class="review-feel-name">${l.short}</span>
+      <span class="review-feel-days" aria-hidden="true">${days}</span>
+      <span class="review-feel-said">${listDays(counts)}</span>
+    </li>`;
+  }).join('');
+  const ground = capital(listDays(rows.filter((x) => x.feel.grind >= GRINDS).map((x) => x.l.short.toLowerCase())));
+  const advice = !ground ? ''
+    : state.trainingMax ? ` ${ground} ground ${GRINDS} or more times even on a 90% training max: start block ${n + 1} lower.`
+      : ` ${ground} ground ${GRINDS} or more times, a sign the heavy days ran too close to the max: switch to a 90% training max in Settings → Work from, or start block ${n + 1} lower.`;
+  return `<section class="chart-block">
+    <h2 class="chart-title">Heavy days</h2>
+    <ul class="review-feel">${list}</ul>
+    <p class="hint">Each heavy day in weeks 1 to 7: easy, smooth or a grind.${advice}</p>
+  </section>`;
+}
+
+// Everything lifted in the block, and each week's weight × reps.
+function reviewWork(sum) {
+  if (!sum.sets) return '';
+  const most = Math.max(...sum.weeks.map((w) => w.volume));
+  const weeks = sum.weeks.map((w, i) => `<li class="review-week">
+      <span class="review-week-v" aria-hidden="true">${w.volume ? `${Math.round(w.volume / 1000)}k` : '–'}</span>
+      <span class="review-week-bar${isLightWeek(i) ? ' is-light' : ''}" style="height:${Math.max(4, (w.volume / most) * 100).toFixed(1)}px"></span>
+      <span class="review-week-num" aria-hidden="true">${i + 1}</span>
+      <span class="sr-only">Week ${i + 1}: ${Math.round(w.volume).toLocaleString()}</span>
+    </li>`).join('');
+  return `<section class="chart-block">
+    <h2 class="chart-title">The work</h2>
+    <dl class="stats">
+      <div><dt>Sets</dt><dd>${sum.sets.toLocaleString()}</dd></div>
+      <div><dt>Volume</dt><dd>${Math.round(sum.volume).toLocaleString()}</dd></div>
+      ${sum.timed ? `<div><dt>A day</dt><dd>${spanShort(sum.ms / sum.timed)}</dd></div>` : ''}
+    </dl>
+    <ol class="review-weeks" aria-label="Weight × reps each week">${weeks}</ol>
+    <p class="hint">Weight × reps each week in ${state.unit}, main lifts and accessories. Weeks 7 and 8 are lighter on purpose.${sum.timed ? ` A day is the average of the ${plural(sum.timed, 'day')} timed from Start to End workout.` : ''}</p>
+  </section>`;
+}
+
+// The block's days trained and skipped, and the share of accessories done on the days trained.
+function reviewShowingUp(b, c, sum) {
+  const extras = sum.extrasDue ? `${sum.extrasDone} of ${plural(sum.extrasDue, 'accessory')} done on the days trained.` : '';
+  const remax = b.finish === 'remax' ? ' Week 8’s re-max has no Thursday or Friday.' : '';
+  return `<section class="chart-block">
+    <h2 class="chart-title">Showing up</h2>
+    <dl class="stats">
+      <div><dt>Trained</dt><dd>${c.trained}</dd></div>
+      <div><dt>Skipped</dt><dd>${c.skipped}</dd></div>
+      ${sum.extrasDue ? `<div><dt>Accessories</dt><dd>${pct(sum.extrasDone / sum.extrasDue)}</dd></div>` : ''}
+    </dl>
+    ${dayGrid(c, false)}
+    ${extras || remax ? `<p class="hint">${(extras + remax).trim()}</p>` : ''}
+  </section>`;
+}
+
+// This block's accessories that went up the most, and any that stalled.
+function reviewExtras(n, sum) {
+  const trends = accessoryTrends(state, n - 1);
+  if (!trends.length) return '';
+  const shown = 3;
+  const up = trends.filter((t) => t.change > 0).sort((a, b) => b.change - a.change);
+  const stuck = trends.filter((t) => t.flat >= STUCK_AFTER).sort((a, b) => b.flat - a.flat);
+  const upRows = up.slice(0, shown).map((t) => trendRow(t, `+${Math.round(t.change * 100)}%`, trendUp(t), false)).join('');
+  const stuckRows = stuck.slice(0, shown).map((t) => trendRow(t, '', trendStuck(t), false)).join('');
+  return `<section class="chart-block">
+    <h2 class="chart-title">Accessories</h2>
+    <p class="hint">${up.length} of ${trends.length} went up this block${sum.bests ? `, with ${plural(sum.bests, 'new best')}` : ''}.</p>
+    ${upRows ? `<h3 class="stat-sub">Most improved</h3><ul class="index-list">${upRows}</ul>` : ''}
+    ${stuckRows ? `<h3 class="stat-sub">Stuck</h3><ul class="index-list">${stuckRows}</ul>
+      <p class="hint">${stuck.length > shown ? `And ${stuck.length - shown} more, in History → Stats. ` : ''}Drop the weight about 10% in block ${n + 1} and build back up, or switch variants.</p>` : ''}
+  </section>`;
+}
+
+// Body weight from the block's first weigh-in to its last, against the total.
+function reviewBody(b, total, n) {
+  const days = (state.bodyweight ?? []).filter((x) => x.date >= b.started).sort((x, y) => (x.date < y.date ? -1 : 1));
+  if (days.length < 2) return '';
+  const first = days[0];
+  const last = days[days.length - 1];
+  return `<section class="chart-block">
+    <h2 class="chart-title">Body weight</h2>
+    <dl class="stats">
+      <div><dt>${shortDate(first.date)}</dt><dd>${fmt(first.weight)}</dd></div>
+      <div><dt>${shortDate(last.date)}</dt><dd>${fmt(last.weight)}</dd></div>
+      <div><dt>Change</dt><dd>${changeText(tidy(last.weight - first.weight))}</dd></div>
+    </dl>
+    <p class="hint">The total for block ${n + 1} is ${(total.now / last.weight).toFixed(2)}× your body weight, from ${(total.was / first.weight).toFixed(2)}× at the start of block ${n}.</p>
+  </section>`;
 }
 
 function chartWidth() {
@@ -1492,16 +1877,30 @@ function maxStats() {
 const DAY_STATES = { trained: 'Trained', skipped: 'Skipped', next: 'Next', todo: 'To come' };
 
 // This block's days as a grid of weekdays by weeks, with each weekday's share trained over every block.
-function showingUp() {
-  const c = consistency(state);
+// The current block's days, a row per weekday and a column per week, with each weekday's share trained over every
+// block when `rates`. Without them, the legend leaves out states the grid doesn't have.
+function dayGrid(c, rates) {
   const head = block().log.map((_, w) => `<th scope="col">${w + 1}</th>`).join('');
   const rows = WEEKDAYS.map((day, d) => {
     const cells = c.grid[d].map((st) => (st
       ? `<td><i class="day-cell is-${st}" aria-hidden="true"></i><span class="sr-only">${DAY_STATES[st]}</span></td>` : '<td></td>')).join('');
     const { trained, skipped } = c.byDay[d];
-    return `<tr><th scope="row">${shortDay(day)}</th>${cells}<td class="day-rate">${trained + skipped ? pct(trained / (trained + skipped)) : '–'}</td></tr>`;
+    const rate = rates ? `<td class="day-rate">${trained + skipped ? pct(trained / (trained + skipped)) : '–'}</td>` : '';
+    return `<tr><th scope="row">${shortDay(day)}</th>${cells}${rate}</tr>`;
   }).join('');
-  const legend = Object.entries(DAY_STATES).map(([k, label]) => `<span><i class="day-cell is-${k}"></i>${label}</span>`).join('');
+  const shown = new Set(c.grid.flat());
+  const legend = Object.entries(DAY_STATES).filter(([k]) => rates || shown.has(k))
+    .map(([k, label]) => `<span><i class="day-cell is-${k}"></i>${label}</span>`).join('');
+  return `<table class="day-grid">
+      <caption class="sr-only">Block ${state.blocks.length}, each training day by week</caption>
+      <thead><tr><th scope="col"><span class="sr-only">Day</span></th>${head}${rates ? '<th scope="col" class="day-rate">All</th>' : ''}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="chart-legend day-legend">${legend}</p>`;
+}
+
+function showingUp() {
+  const c = consistency(state);
   const slips = c.slips
     ? `${c.slips.day}s slip the most: ${c.slips.skipped} of ${c.slips.trained + c.slips.skipped} skipped.`
     : 'Nothing skipped yet.';
@@ -1512,15 +1911,28 @@ function showingUp() {
       <div><dt>Skipped</dt><dd>${c.skipped}</dd></div>
       <div><dt>In a row</dt><dd>${c.run}</dd></div>
     </dl>
-    <table class="day-grid">
-      <caption class="sr-only">Block ${state.blocks.length}, each training day by week</caption>
-      <thead><tr><th scope="col"><span class="sr-only">Day</span></th>${head}<th scope="col" class="day-rate">All</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <p class="chart-legend day-legend">${legend}</p>
+    ${dayGrid(c, true)}
     <p class="hint">${slips} Trained and skipped count this block's days; in a row is days trained since the last one skipped. The weeks are block ${state.blocks.length}'s, and All is each weekday trained over every block.</p>
   </section>`;
 }
+
+// One accessory's trend as a row: a button to its history in History, or plain where that isn't open.
+function trendRow(t, num, meta, open = true) {
+  const inside = `${picHTML(t.exercise, t.variant)}<span class="index-text">
+      <span class="index-name">${esc(t.exercise.name)}${t.variant ? ` (${esc(t.variant)})` : ''}</span><span class="index-meta">${meta}</span>
+    </span><span class="stat-row-num">${num}</span>`;
+  return open
+    ? `<li><button class="index-row stat-row" data-action="exercise-open" data-exercise="${t.exercise.id}"${t.variant ? ` data-variant="${esc(t.variant)}"` : ''}>${inside}</button></li>`
+    : `<li><div class="index-row stat-row">${inside}</div></li>`;
+}
+
+// How a trend went up: "Est. max 120 to 135, over 6 sessions", or most reps for body-weight work.
+function trendUp(t) {
+  const best = (v) => (v.kind === 'reps' ? plural(v.value, 'rep') : estText(t.exercise, v.value));
+  return `${t.first.kind === 'reps' ? 'Most reps' : 'Est. max'} ${best(t.first)} to ${best(t.last)}, over ${plural(t.sessions, 'session')}`;
+}
+
+const trendStuck = (t) => `Level for ${t.flat} sessions. Last: ${setsText(t.latest.sets, t.exercise)}`;
 
 // Which accessories are going up since they were first logged, and which have stalled.
 function accessoryStats() {
@@ -1531,15 +1943,10 @@ function accessoryStats() {
       <p class="chart-empty">Shows once you've done an accessory twice: which ones are going up, and any that have stopped.</p>
     </section>`;
   }
-  const best = (t, v) => (v.kind === 'reps' ? plural(v.value, 'rep') : estText(t.exercise, v.value));
-  const row = (t, num, meta) => `<li><button class="index-row stat-row" data-action="exercise-open" data-exercise="${t.exercise.id}"${t.variant ? ` data-variant="${esc(t.variant)}"` : ''}>${picHTML(t.exercise, t.variant)}<span class="index-text">
-      <span class="index-name">${esc(t.exercise.name)}${t.variant ? ` (${esc(t.variant)})` : ''}</span><span class="index-meta">${meta}</span>
-    </span><span class="stat-row-num">${num}</span></button></li>`;
   const up = trends.filter((t) => t.change > 0).sort((a, b) => b.change - a.change);
   const stuck = trends.filter((t) => t.flat >= STUCK_AFTER).sort((a, b) => b.flat - a.flat);
-  const upRows = up.slice(0, 5).map((t) => row(t, `+${Math.round(t.change * 100)}%`,
-    `${t.first.kind === 'reps' ? 'Most reps' : 'Est. max'} ${best(t, t.first)} to ${best(t, t.last)}, over ${plural(t.sessions, 'session')}`)).join('');
-  const stuckRows = stuck.map((t) => row(t, '', `Level for ${t.flat} sessions. Last: ${setsText(t.latest.sets, t.exercise)}`)).join('');
+  const upRows = up.slice(0, 5).map((t) => trendRow(t, `+${Math.round(t.change * 100)}%`, trendUp(t))).join('');
+  const stuckRows = stuck.map((t) => trendRow(t, '', trendStuck(t))).join('');
   return `<section class="chart-block">${title}
     <p class="hint">${up.length} of ${trends.length} going up since you first logged them, each variant on its own.</p>
     ${upRows ? `<h3 class="stat-sub">Going up</h3><ul class="index-list">${upRows}</ul>` : ''}
@@ -1943,6 +2350,9 @@ function versionLine() {
 
 const shortDay = (d) => d.slice(0, 3);
 const listDays = (days) => (days.length > 1 ? `${days.slice(0, -1).join(', ')} and ${days[days.length - 1]}` : days.join(''));
+const capital = (text) => text.replace(/^./, (c) => c.toUpperCase());
+// A kind of day (extras.js DAY_KINDS) by its lift: "Bench days", "Deadlift day".
+const kindName = (k) => `${LIFTS.find((l) => l.id === k.lift).short} day${k.days.length > 1 ? 's' : ''}`;
 
 // The exercises by kind of day (bench days, squat days, deadlift day), each day's in the order it does them.
 // Each kind is one closed line until it's tapped, and one is open at a time, so the list doesn't run on.
@@ -1952,7 +2362,7 @@ function exercisesSection() {
     const lift = LIFTS.find((l) => l.id === k.lift);
     const open = ui.exerciseKind === key;
     const head = `<h3 class="index-group-head"><button class="index-group" data-action="exercise-kind" data-kind="${key}" data-key="exercise-kind-${key}" aria-expanded="${open}">
-        <span class="index-group-name">${lift ? `${lift.short} day${k.days.length > 1 ? 's' : ''}` : 'No set days'}</span>
+        <span class="index-group-name">${lift ? kindName(k) : 'No set days'}</span>
         <span class="index-group-days">${lift ? listDays(k.days) : 'Only when added to a day'}. ${k.exercises.length ? plural(k.exercises.length, 'exercise') : 'None yet'}</span>
       </button></h3>`;
     if (!open) return head;
@@ -2999,11 +3409,15 @@ const ACTIONS = {
     render();
   },
   'extra-finish'(el) {
-    finishExtras(state, sessionAt(Number(el.dataset.index)));
+    const i = Number(el.dataset.index);
+    const left = unfinished(sessionAt(i));
+    finishExtras(state, sessionAt(i));
     ui.extraOpen = null;
     save();
     rest.stop();
     render();
+    const short = shortWeekText(i, left);
+    if (short) toast(`Skipped the rest.${short}`);
   },
   // Starting dates the day (and closes earlier ones) the same as logging a set does.
   'workout-start'(el) {
@@ -3014,14 +3428,16 @@ const ACTIONS = {
     render();
   },
   'workout-end'(el) {
-    const session = sessionAt(Number(el.dataset.index));
+    const i = Number(el.dataset.index);
+    const session = sessionAt(i);
+    const open = unfinished(session);
     session.ended = nowISO();
     const left = finishExtras(state, session);
     ui.extraOpen = null;
     save();
     rest.stop();
     render();
-    toast(`Workout ended, ${spanText(workoutTime(session).total)}.${left ? ` ${plural(left, 'accessory')} not finished ${left === 1 ? 'was' : 'were'} skipped.` : ''}`);
+    toast(`Workout ended, ${spanText(workoutTime(session).total)}.${left ? ` ${plural(left, 'accessory')} not finished ${left === 1 ? 'was' : 'were'} skipped.${shortWeekText(i, open)}` : ''}`);
   },
   // The workout pane: Train, on the day under way, at what's next (the accessory opened), or at End once it's all done.
   'workout-open'() {
@@ -3050,12 +3466,25 @@ const ACTIONS = {
     render();
     toast('Reopened. Anything skipped stays skipped until you undo it.');
   },
+  // A skip that leaves the muscle's week short says so (the line on the row said it first); Undo is on the row.
   'extra-skip'(el) {
-    const session = sessionAt(Number(el.dataset.index));
+    const i = Number(el.dataset.index);
+    const session = sessionAt(i);
     const e = exerciseById(el.dataset.exercise);
+    const concern = concernFor(session, i, e);
     entryFor(session, e, defaultVariant(state, e)).skipped = true;
     save();
     render();
+    if (concern) toast(`${e.name} skipped. ${concernText(concern)}`);
+  },
+  // From the day's summary: an exercise skipped time after time comes off this kind of day. Its log stays.
+  'extra-drop'(el) {
+    const e = exerciseById(el.dataset.exercise);
+    const kind = DAY_KINDS.find((k) => k.days.includes(sessionAt(Number(el.dataset.index)).day));
+    e.days = e.days.filter((d) => !kind.days.includes(d));
+    save();
+    render();
+    toast(`${e.name} is off ${kindName(kind).toLowerCase()}. Add it back in Settings → Accessories.`);
   },
   'extra-unskip'(el) {
     entryOf(sessionAt(Number(el.dataset.index)), el.dataset.exercise).skipped = false;
@@ -3135,6 +3564,20 @@ const ACTIONS = {
   },
   'history-view'(el) {
     Object.assign(ui, { history: el.dataset.view, exercise: null });
+    render();
+    scrollTop();
+  },
+  'week-hide'(el) {
+    try {
+      localStorage.setItem(WEEK_HIDDEN, weekId(block(), Number(el.dataset.week)));
+    } catch {
+      // Without storage the card stays until something in the new week is done.
+    }
+    render();
+  },
+  'week-muscles'(el) {
+    markTrainSpot();
+    Object.assign(ui, { tab: 'history', history: 'muscles', muscleWeek: Number(el.dataset.week), exercise: null });
     render();
     scrollTop();
   },

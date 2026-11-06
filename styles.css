@@ -17,6 +17,8 @@
   --red: #e0483e;
   --red-text: #ffb2a8;
   --gain: #7dd3a0;
+  /* A heads-up short of a miss: an accessory whose skip leaves its muscle's week short. */
+  --warn-text: #f2c66d;
 
   /* Chart series, checked for colour-blind separation and 3:1 contrast on --bg. */
   --series-1: #3987e5;
@@ -1153,6 +1155,26 @@ legend.setting-title + * {
   color: var(--steel);
 }
 
+/* What skipping it would leave its muscle's week at; red once it keeps happening. On the line, under the summary. */
+.skip-warn {
+  color: var(--warn-text);
+  font-size: 14px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
+.skip-warn.is-strong {
+  color: var(--red-text);
+}
+
+.row-line .skip-warn {
+  grid-column: 1 / -1;
+}
+
+.extra-detail .skip-warn {
+  margin-top: 6px;
+}
+
 .extra.is-open .extra-top {
   padding-bottom: 0;
 }
@@ -1326,6 +1348,27 @@ legend.setting-title + * {
   font-variant-numeric: tabular-nums;
 }
 
+.summary-drops {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.summary-drops li {
+  display: grid;
+  justify-items: start;
+}
+
+.summary-drop {
+  min-height: 40px;
+  padding: 0;
+  color: var(--chalk);
+  font-size: 15px;
+  text-align: left;
+}
+
 .time-rows {
   display: grid;
   gap: 4px;
@@ -1343,6 +1386,168 @@ legend.setting-title + * {
 .time-rows li span:last-child {
   flex-shrink: 0;
   color: var(--muted);
+}
+
+/* A finished week's card at the top of Train: its numbers, each day's top set, and what to keep an eye on. */
+.recap {
+  margin-top: 18px;
+  padding: 18px 16px 16px;
+  border: 1.5px solid var(--chalk);
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--surface), var(--bg) 70%);
+}
+
+.recap-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recap-title {
+  font: 800 32px/1 var(--display);
+}
+
+.recap-hide {
+  min-height: 0;
+  padding: 4px;
+  font-size: 15px;
+}
+
+.recap-meta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.recap .stats {
+  gap: 10px 22px;
+  margin-top: 16px;
+}
+
+.recap .stats dd {
+  font-size: 28px;
+}
+
+.recap-days {
+  display: grid;
+  grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+  gap: 6px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recap-days li {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 2px 8px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.recap-days li.is-down {
+  border-color: rgba(224, 72, 62, 0.6);
+}
+
+.recap-days li.is-skipped {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.recap-day {
+  font: 700 17px/1 var(--display);
+}
+
+.recap-top {
+  font: 700 19px/1 var(--display);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.recap-lift {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Plain text for Smooth and Skipped; a pill for good and bad news. */
+.recap-chip {
+  overflow: hidden;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 1px 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recap-chip.is-up,
+.recap-chip.is-down {
+  padding: 1px 7px 2px;
+  border-radius: 999px;
+}
+
+.recap-chip.is-up {
+  background: rgba(125, 211, 160, 0.16);
+  color: var(--gain);
+}
+
+.recap-chip.is-down {
+  background: rgba(224, 72, 62, 0.2);
+  color: var(--red-text);
+}
+
+.recap-watch {
+  margin-top: 14px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--steel);
+  font-size: 15px;
+}
+
+.recap-watch.is-down {
+  border-left-color: var(--red);
+}
+
+.recap-watch strong {
+  display: block;
+  margin-bottom: 2px;
+  font: 700 18px/1.1 var(--display);
+}
+
+.recap-watch span {
+  color: var(--muted);
+}
+
+.recap-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.recap-foot .hint {
+  margin: 0;
+  font-size: 14px;
+}
+
+.recap-foot .btn-line {
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .extra-actions {
@@ -1376,21 +1581,300 @@ legend.setting-title + * {
   margin: -8px 0 8px -4px;
 }
 
-.review {
-  margin-top: 10px;
+/* The block review: next block's total, then how the block went, then the form that starts the next one. */
+.review-hero {
+  margin-top: 18px;
+  padding: 18px 16px 16px;
+  border: 1.5px solid var(--chalk);
+  border-radius: 16px;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(57, 135, 229, 0.18), transparent 60%),
+    linear-gradient(180deg, var(--surface), var(--bg) 80%);
 }
 
-.review-lift {
-  padding: 22px 0;
-  border-top: 1px solid var(--line);
+.review-hero-label {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.review-total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-top: 6px;
+}
+
+.review-total .show-digits {
+  font: 800 clamp(60px, 21vw, 84px)/0.88 var(--display);
+  font-variant-numeric: tabular-nums;
+}
+
+.review-total-change {
+  display: grid;
+  gap: 4px;
+}
+
+.review-total-change .review-change {
+  font-size: 28px;
+}
+
+.review-was {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.review-hero .stat-tiles {
+  margin-top: 16px;
+}
+
+.review-change {
+  color: var(--muted);
+  font: 700 16px/1 var(--display);
+}
+
+.review-change.is-up {
+  color: var(--gain);
+}
+
+.review-change.is-down {
+  color: var(--red-text);
+}
+
+.review-paths {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-path {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.review-path-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.review-path-name {
+  font: 700 22px/1.1 var(--display);
+}
+
+.review-path-new {
+  font: 800 26px/1 var(--display);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.review-path-new small {
+  margin-left: 6px;
+}
+
+.review-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 8px;
+  overflow: visible;
+}
+
+.review-chart text {
+  font: 600 11px var(--text);
+  fill: var(--muted);
+}
+
+.review-chart .review-chart-v {
+  font: 700 13px var(--display);
+  fill: var(--chalk);
+}
+
+.review-chart .is-new {
+  font-size: 16px;
+}
+
+.review-attempts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-attempts b {
+  color: var(--chalk);
+  font-weight: 700;
+}
+
+.review-attempts .is-miss b {
+  color: var(--red-text);
+  text-decoration: line-through;
 }
 
 .review-why {
-  margin: 8px 0 14px;
+  margin: 10px 0 0;
 }
 
 .review-why.is-held {
   color: var(--red-text);
+}
+
+.review-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.review-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+
+.review-legend .is-from {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--steel);
+  vertical-align: 3px;
+}
+
+.review-legend .is-test {
+  background: var(--series-1);
+}
+
+.review-legend .is-good {
+  background: var(--chalk);
+}
+
+.review-legend .is-miss {
+  box-shadow: inset 0 0 0 2px var(--red);
+}
+
+.review-feel {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-feel li {
+  display: grid;
+  grid-template-columns: 5.2em 1fr;
+  gap: 6px 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.review-feel-name {
+  font: 700 20px/1 var(--display);
+}
+
+.review-feel-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.review-feel-days i {
+  display: grid;
+  place-items: center;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--ink);
+  font: 700 13px/1 var(--display);
+  font-style: normal;
+}
+
+.review-feel-days .is-easy {
+  background: var(--gain);
+}
+
+.review-feel-days .is-smooth {
+  background: var(--chalk);
+}
+
+.review-feel-days .is-grind {
+  background: var(--red);
+  color: #fff;
+}
+
+.review-feel-days .is-none {
+  box-shadow: inset 0 0 0 1.5px var(--line);
+  color: var(--muted);
+}
+
+.review-feel-said {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.review-weeks {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
+  align-items: end;
+  height: 150px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-week {
+  display: grid;
+  justify-items: center;
+  align-content: end;
+  gap: 5px;
+  height: 100%;
+}
+
+.review-week-bar {
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, var(--chalk), #b9c3cd);
+}
+
+.review-week-bar.is-light {
+  background: var(--steel);
+}
+
+.review-week-num {
+  font: 700 16px/1 var(--display);
+}
+
+.review-week-v {
+  color: var(--muted);
+  font: 700 12px/1 var(--display);
+}
+
+.review {
+  margin-top: 34px;
+  padding-top: 22px;
+  border-top: 1.5px solid var(--steel);
+}
+
+.review .field {
+  margin-top: 14px;
+}
+
+.review-lift {
+  margin-top: 22px;
+  padding: 22px 0;
+  border-top: 1px solid var(--line);
 }
 
 .review .btn-wide {

@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { newBlock, emptyState, LB_PER_KG } from '../logic.js';
 import { newExercise, ensureEntry } from '../extras.js';
-import { DOTS, dots, strength, gains, maxChecks, nextTest, testBands, consistency, totals, accessoryTrends, STUCK_AFTER } from '../stats.js';
+import {
+  DOTS, dots, strength, gains, maxChecks, nextTest, testBands, consistency, totals, accessoryTrends, weekSummary, blockSummary, maxPath,
+  STUCK_AFTER,
+} from '../stats.js';
 
 const MAX = { squat: 385, bench: 315, deadlift: 455 };
 
@@ -132,6 +135,59 @@ test('totals add the main work sets, accessories with plates on both sides, and 
   assert.equal(totals(state).blocks[0].days, 1);
 });
 
+test('a week sums up each day against its plan, the accessories due and the new bests', () => {
+  const { state, b } = setup();
+  const curl = newExercise({ name: 'Leg curl', variants: [], sets: 2, low: 8, high: 12, step: 5, rest: 90, days: ['Tuesday', 'Friday'] });
+  const calf = newExercise({ name: 'Calf raise', variants: [], sets: 2, low: 8, high: 12, step: 5, rest: 90, days: ['Tuesday'] });
+  state.exercises.push(curl, calf);
+  day(b, 0, 'Monday').reps = [6, 6, 7]; // 220
+  day(b, 0, 'Wednesday').skipped = true;
+  const tue = day(b, 0, 'Tuesday');
+  Object.assign(tue, { reps: [6, 6, 5], date: '2026-11-03' }); // 270, a rep short on the last
+  ensureEntry(tue, curl, null).sets = [{ weight: 190, reps: 10 }, { weight: 190, reps: 8 }];
+  ensureEntry(tue, calf, null).skipped = true;
+  const thu = day(b, 0, 'Thursday');
+  Object.assign(thu, { reps: [4, 4, 5], feel: 'grind', date: '2026-11-05', started: '2026-11-05T17:00:00Z', ended: '2026-11-05T18:00:00Z' });
+  const fri = day(b, 0, 'Friday');
+  Object.assign(fri, { reps: [4, 4, 4], date: '2026-11-06' }); // 300
+  ensureEntry(fri, curl, null).sets = [{ weight: 190, reps: 12 }, { weight: 190, reps: 8 }];
+  const w = weekSummary(state, 0, 0);
+  assert.deepEqual({ ...w, days: undefined }, {
+    from: '2026-11-03', to: '2026-11-06', days: undefined, trained: 4, skipped: 1, bests: 1, extrasDone: 2, extrasDue: 3,
+    sets: 16, volume: 220 * 19 + 270 * 17 + 245 * 13 + 300 * 12 + 190 * 38, ms: 3600000, timed: 1,
+  });
+  assert.deepEqual(w.days.map((d) => [d.day, d.top, d.over, d.short, d.feel]), [
+    ['Monday', { weight: 220, reps: 7 }, 1, 0, null],
+    ['Tuesday', { weight: 270, reps: 6 }, 0, 1, null],
+    ['Wednesday', undefined, undefined, undefined, undefined],
+    ['Thursday', { weight: 245, reps: 5 }, 1, 0, 'grind'],
+    ['Friday', { weight: 300, reps: 4 }, 0, 0, null],
+  ]);
+  assert.equal(w.days[2].skipped, true);
+});
+
+test('a block adds up its weeks, and each max runs from the start through the test sets to the re-max', () => {
+  const { state, b } = setup();
+  Object.assign(day(b, 0, 'Monday'), { reps: [6, 6, 6], date: '2026-11-02' }); // 220
+  day(b, 0, 'Tuesday').skipped = true;
+  Object.assign(day(b, 2, 'Tuesday'), { reps: [2, 2, 2, 2, 7], date: '2026-11-17' }); // 320, 7 reps raises 5
+  Object.assign(day(b, 5, 'Tuesday'), { reps: [2, 2, 2, 6], date: '2026-12-08' }); // 330
+  Object.assign(day(b, 7, 'Tuesday'), { reps: [1, 1, 0], weights: [null, null, 420], date: '2026-12-22' });
+  Object.assign(day(b, 7, 'Monday'), { reps: [1, null, null], date: '2026-12-21' }); // the second and third not judged
+  const sum = blockSummary(state, 0);
+  assert.deepEqual(sum.weeks.map((w) => w.volume), [3960, 0, 4800, 0, 0, 3960, 0, 355 + 375 + 285]);
+  assert.deepEqual({ ...sum, weeks: undefined }, {
+    from: '2026-11-02', to: '2026-12-22', weeks: undefined, sets: 16, volume: 13735, ms: 0, timed: 0, bests: 0, extrasDone: 0, extrasDue: 0,
+  });
+  const squat = maxPath(state, 0, 'squat');
+  assert.deepEqual([squat.start, squat.wave], [385, 390]);
+  assert.deepEqual(squat.tests.map((t) => [t.week, t.weight, t.reps]), [[2, 320, 7], [5, 330, 6]]);
+  assert.deepEqual(squat.attempts, [{ attempt: 0, weight: 355, good: true }, { attempt: 1, weight: 375, good: true }, { attempt: 2, weight: 420, good: false }]);
+  assert.deepEqual(maxPath(state, 0, 'bench'), { start: 315, wave: 315, tests: [], attempts: [{ attempt: 0, weight: 285, good: true }] });
+  day(b, 7, 'Wednesday').skipped = true;
+  assert.deepEqual(maxPath(state, 0, 'deadlift').attempts, []);
+});
+
 test('accessory trends measure the change since the first session and how long progress has stalled', () => {
   const { state, b } = setup();
   const row = newExercise({ name: 'Row', variants: ['Cable', 'Machine'], sets: 2, low: 8, high: 12, step: 5, rest: 90, days: ['Monday'] });
@@ -160,4 +216,12 @@ test('accessory trends measure the change since the first session and how long p
   state.exercises.push(newExercise({ name: 'Curl', variants: [], sets: 2, low: 8, high: 12, step: 5, rest: 60, days: ['Monday'] }));
   log(0, state.exercises[2], null, two(30, 10));
   assert.equal(accessoryTrends(state).length, 3);
+  // A block's own trends count only its sessions.
+  state.blocks.push(newBlock(MAX, '2026-12-28'));
+  ensureEntry(day(state.blocks[1], 0, 'Monday'), dip, null).sets = two(0, 12);
+  ensureEntry(day(state.blocks[1], 1, 'Monday'), dip, null).sets = two(0, 15);
+  assert.equal(accessoryTrends(state).find((t) => t.exercise === dip).sessions, 4);
+  assert.equal(accessoryTrends(state, 0).find((t) => t.exercise === dip).sessions, 2);
+  const [fresh, ...none] = accessoryTrends(state, 1);
+  assert.deepEqual([fresh.exercise, fresh.sessions, fresh.change, none], [dip, 2, 0.25, []]);
 });

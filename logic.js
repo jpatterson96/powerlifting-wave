@@ -321,7 +321,8 @@ export function newBlock(max, started, finish = 'remax') {
   };
 }
 
-const touched = (session) => session.skipped || session.reps.some((r) => r !== null) || session.weight !== null ||
+// Anything done on a day: a skip, a rep, a weight changed, or an accessory skipped or logged.
+export const touched = (session) => session.skipped || session.reps.some((r) => r !== null) || session.weight !== null ||
   Boolean(session.weights?.some((w) => w !== null)) || Boolean(session.extras?.some((x) => x.skipped || x.sets.some(Boolean)));
 
 // Switches week 8 between a re-max and a deload; only before anything in it is logged.

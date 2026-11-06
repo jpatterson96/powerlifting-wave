@@ -31,9 +31,19 @@
     <span class="rest-track" aria-hidden="true"><span class="rest-fill" id="rest-fill"></span></span>
     <span class="rest-time" id="rest-time" role="timer">0:00</span>
     <span class="rest-label" id="rest-label" aria-live="polite">Rest</span>
-    <button class="rest-btn rest-add" data-action="rest-add">+30 s</button>
+    <button class="rest-btn rest-sub" data-action="rest-add" data-seconds="-30" aria-label="30 seconds less">−30 s</button>
+    <button class="rest-btn rest-add" data-action="rest-add" data-seconds="30" aria-label="30 seconds more">+30 s</button>
     <button class="rest-btn rest-stop" data-action="rest-stop">Done</button>
     <span class="rest-next" id="rest-next"></span>
+    <span class="rest-clock" id="rest-clock" role="timer" aria-label="Workout time" hidden></span>
+  </aside>
+
+  <aside class="rest is-workout" id="workout" aria-label="Workout" data-action="workout-open" hidden>
+    <span class="rest-track" aria-hidden="true"><span class="rest-fill" id="workout-fill"></span></span>
+    <span class="rest-time" id="workout-time" role="timer">0:00</span>
+    <span class="workout-say"><span class="rest-label" id="workout-sets"></span><span class="workout-left" id="workout-left"></span></span>
+    <button class="rest-btn rest-stop" data-action="workout-finish" id="workout-end" aria-label="End workout" hidden>End</button>
+    <span class="rest-next" id="workout-next"></span>
   </aside>
 
   <nav class="tabs" id="tabs" aria-label="Sections" hidden>

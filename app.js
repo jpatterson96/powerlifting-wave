@@ -7,8 +7,8 @@ import {
 } from './logic.js';
 import {
   WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, SMALL_PLATES, isCounted, countedPlates, weightOf, loadOf, PLATES_UP_TO, GUESSED_STEP, looksCounted, countInPlates, isLightWeek, plannedSets, newExercise,
-  dayExtras, dayGroups, exercisesByDay, moveExercise, setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, lastTime, isNewBest, defaultVariant,
-  suggestion, sessionBest, records, muscleSets, workoutTime, timedSessions, logBodyweight, cleanExtras,
+  dayExtras, dayGroups, exercisesByDay, moveExercise, setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, earlierTimes, isNewBest, defaultVariant,
+  suggestion, sessionBest, records, muscleSets, workoutTime, timedSessions, partTimes, logBodyweight, cleanExtras,
 } from './extras.js';
 import { mergeLogs } from './merge.js';
 import { DECIMALS, press, typed, nudge } from './pad.js';
@@ -17,11 +17,11 @@ import { SHOW, PR_SHOW, showPlan, prShow, stepAt } from './show.js';
 import * as sync from './sync.js';
 import * as rest from './rest.js';
 import { maxChart, volumeChart, progressChart, sparkline } from './charts.js';
-import { DOTS, STUCK_AFTER, strength, gains, maxChecks, nextTest, consistency, totals, accessoryTrends } from './stats.js';
+import { DOTS, STUCK_AFTER, strength, gains, maxChecks, nextTest, testBands, consistency, totals, accessoryTrends } from './stats.js';
 
 const KEY = 'powerlifting-wave';
 // The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
-const VERSION = 'wave-v20';
+const VERSION = 'wave-v21';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -204,6 +204,23 @@ function scrollTop() {
   window.scrollTo(0, 0);
 }
 
+// Where Train was left for another tab: the first row still on screen, by its data-key, and how far down the
+// screen it sat. Coming back puts that row in the same place, even if something above it changed meanwhile (an
+// exercise added in Settings, a notice gone); without it, the same scroll. Block review isn't kept, since leaving
+// it goes back to the week.
+let trainSpot = null;
+
+function markTrainSpot() {
+  const el = [...view.querySelectorAll('[data-key]')].find((x) => x.getBoundingClientRect().bottom > 0);
+  trainSpot = ui.reviewing ? null : { key: el?.dataset.key, top: el?.getBoundingClientRect().top, y: window.scrollY };
+}
+
+function backToTrainSpot() {
+  const el = trainSpot?.key && view.querySelector(`[data-key="${trainSpot.key}"]`);
+  if (el) window.scrollBy(0, el.getBoundingClientRect().top - trainSpot.top);
+  else window.scrollTo(0, trainSpot?.y ?? 0);
+}
+
 // ---------- Views ----------
 
 function render() {
@@ -228,6 +245,7 @@ function render() {
     else if (ui.tab === 'settings') view.innerHTML = settingsView();
     else view.innerHTML = ui.reviewing ? reviewView() : trainView();
   }
+  paintWorkout();
   if (focusKey) view.querySelector(`[data-key="${focusKey}"]`)?.focus({ preventScroll: true });
 }
 
@@ -599,11 +617,12 @@ function sessionBody(b, session, i) {
     </button>
     ${session.weight !== null && session.weight !== target ? `<p class="lift-target">Target is ${fmt(target)}</p>` : ''}
     ${barbell(shown)}
-    ${warmupList(session, i, ramp, single ? `The last is one heavy single at ${tidy(p.single * 100)}%. Rest 3 minutes after it, before your sets.` : '')}
+    ${warmupList(session, i, ramp, single ? `The last is one heavy single at ${tidy(p.single * 100)}%. Rest ${SINGLE_REST / 60} minutes after it, before your sets.` : '')}
     ${isHeavyDay(session) ? '<p class="hint">Heavy day: stop each set with 2–4 reps left in the tank.</p>' : ''}
     <div class="sets" role="group" aria-label="${lift.name} sets">
       ${session.reps.map((r, s) => setLight(session, i, s, r)).join('')}
     </div>
+    ${testGuide(session)}
     ${isHeavyDay(session) && sessionStatus(session) === 'done' ? feelCheck(b, session, i) : ''}
     ${skipButton(session, i)}
     ${extrasSection(session, i)}
@@ -621,12 +640,12 @@ function barPlates(weight) {
 
 // The warm-up as steps to tick off, each with the plates a side: the empty bar, then `ramp` ({ weight, reps },
 // a taper day's heavy single marked `single`). A tick is kept in session.warmups by step; the first tick of the
-// day starts the workout clock.
+// day starts the workout clock, and the last step's starts the rest before the first work set.
 function warmupList(session, i, ramp, note) {
   const steps = [{ weight: BAR[state.unit], reps: '5–10' }, ...ramp];
   const rows = steps.map((s, k) => {
     const done = Boolean(session.warmups?.[k]);
-    return `<li><button class="warm-step${done ? ' is-done' : ''}" data-action="warmup" data-index="${i}" data-step="${k}" data-key="warm-${i}-${k}" aria-pressed="${done}">
+    return `<li><button class="warm-step${done ? ' is-done' : ''}" data-action="warmup" data-index="${i}" data-step="${k}"${k === steps.length - 1 ? ' data-last' : ''} data-key="warm-${i}-${k}" aria-pressed="${done}">
       <i class="warm-tick" aria-hidden="true"></i>
       <span class="warm-load">${fmt(s.weight)} × ${s.reps}${s.single ? ' <small>single</small>' : ''}</span>
       <span class="warm-plates">${barPlates(s.weight)}</span>
@@ -638,6 +657,12 @@ function warmupList(session, i, ramp, note) {
     ${note ? `<p class="warmup">${note}</p>` : ''}
   </section>`;
 }
+
+// Rest after the last warm-up: what the first work set or attempt gets, or SINGLE_REST after a taper day's heavy
+// single.
+const SINGLE_REST = 180;
+const warmupRest = (session) => (session.kind !== 'max' && singleWeight(block(), session, ui.week, state)
+  ? SINGLE_REST : restSeconds(session, ui.week, 0));
 
 // After the last set of a heavy day: how the sets moved, since heavy days should leave 2–4 reps in the tank. Two
 // grinds on a lift in a block say its max is set too high, which a 90% training max fixes.
@@ -677,8 +702,11 @@ const here = (index) => [state.blocks.length - 1, ui.week, index];
 function extraPlan(session, index, exercise) {
   const entry = entryOf(session, exercise.id);
   const variant = entry?.variant ?? defaultVariant(state, exercise);
-  const last = lastTime(state, exercise.id, variant, here(index), true);
-  return { entry, variant, last, plan: suggestion(exercise, last, ui.week, state.unit) };
+  // The last two full sessions: two short ones in a row at one weight bring it down.
+  const earlier = earlierTimes(state, exercise.id, variant, here(index), true);
+  const last = earlier[earlier.length - 1] ?? null;
+  const prior = earlier[earlier.length - 2] ?? null;
+  return { entry, variant, last, plan: suggestion(exercise, last, ui.week, state.unit, { prior, sizes: plateSizes(state) }) };
 }
 
 // The day's record for an exercise, made with the week's number of sets the first time it's needed.
@@ -718,8 +746,8 @@ const isUnderway = (x) => x && !x.skipped && x.sets.some(Boolean) && x.sets.some
 const isFinished = (x) => Boolean(x) && (x.skipped || (x.sets.length > 0 && x.sets.every(Boolean)));
 
 // The group to show open: the one tapped, else one under way today. Its first exercise's id names it.
-function openGroup(session, groups) {
-  if (ui.extraOpen !== undefined) return ui.extraOpen;
+function openGroup(session, groups, tapped = ui.extraOpen) {
+  if (tapped !== undefined) return tapped;
   return groups.find((g) => g.some((e) => isUnderway(entryOf(session, e.id))))?.[0].id ?? null;
 }
 
@@ -886,8 +914,10 @@ function extraDetail(session, i, e, named) {
   const note = isLightWeek(ui.week)
     ? `${lightWeekName()}: ${plural(planned, 'set')}${fewer}${last ? `, repeating last time's ${setsText(last.sets.slice(0, planned), e)}` : ` of ${e.low}–${e.high}`}, so your main lifts stay fresh.`
     : !last ? `${range}. First time: ${first}.`
-      : plan.up ? `${range}. Last time ${setsText(last.sets, e)}: every set at the top, so go up to ${loadText(e, plan.weights[0])}.`
-        : `${range}. Last time ${setsText(last.sets, e)}: same ${isCounted(e) ? 'plates' : 'weight'}, one more rep a set.`;
+      : plan.change === 'up' ? `${range}. Last time ${setsText(last.sets, e)}: every set at the top, so go up to ${loadText(e, plan.weights[0])}.`
+        : plan.change === 'add' ? `${range}. Last time ${setsText(last.sets, e)}: every set at the top, so add ${isCounted(e) ? `${loadText(e, plan.weights[0])} a side` : `${fmt(plan.weights[0])} ${state.unit}`} and start again at ${e.low}.`
+          : plan.change === 'down' ? `${range}. Last time ${setsText(last.sets, e)}, under ${e.low} a set on average for the second time running: down to ${loadText(e, plan.weights[0])} to build back up.`
+            : `${range}. Last time ${setsText(last.sets, e)}: same ${isCounted(e) ? 'plates' : 'weight'}, one more rep a set.`;
   const next = Array.from({ length: count }, (_, k) => k).find((k) => !entry?.sets[k]);
   const plates = (e.plates || isCounted(e)) && next !== undefined ? plateNote(e, extraTarget(e, entry, plan, next).weight) : '';
   const chip = e.variants.length > 1
@@ -1189,13 +1219,58 @@ function runMoment(plan) {
   frame();
 }
 
+// ---------- Test sets ----------
+// The last set of a template day in weeks 3 and 6 goes all out, as many clean reps as you can. testBands says what
+// each count of reps does to the max; the fewest that don't lower it are what the set aims for.
+
+const repSpan = (x) => (x.to === null ? `${x.from}+` : x.from === x.to ? String(x.from) : `${x.from}–${x.to}`);
+const bandList = (bands) => `<ol class="band-list" aria-label="Reps on the test set, and the change to the max">${bands
+  .map((x) => `<li class="band is-${x.change}"><strong>${repSpan(x)}</strong><span>${x.change === 'hold' ? 'hold' : signed(x.by)}</span></li>`).join('')}</ol>`;
+// Week 6's test before a re-max moves no max: the attempts build from it.
+const toAttempts = (b, week) => week !== FIRST_TEST && b.finish === 'remax';
+const testFeeds = (b, week) => (week === FIRST_TEST ? 'Its reps move the max for weeks 4–8:' : b.finish === 'deload' ? "Its reps set next block's max:" : 'What its reps say about the max:');
+
+// A day's test set in the week shown: its bands, the reps that hold and raise the max, and `keep`, the fewest that
+// don't lower it (null if no count up to 12 does).
+function testAim(session) {
+  const b = block();
+  const { bands } = testBands(b, session.lift, ui.week, state);
+  const hold = bands.find((x) => x.change === 'hold') ?? null;
+  const raise = bands.find((x) => x.change === 'raise') ?? null;
+  const keeps = toAttempts(b, ui.week) ? 'says your max is right' : 'keeps your max';
+  return { b, bands, hold, raise, keep: (hold ?? raise)?.from ?? null, keeps };
+}
+
+// Under a day's sets while its test set is still to do: all out, with what each count of reps does.
+function testGuide(session) {
+  const last = session.reps.length - 1;
+  if (!isTestSet(session, ui.week, last) || session.reps[last] !== null) return '';
+  const { b, bands } = testAim(session);
+  return `<section class="test-guide" aria-label="Test set">
+    <p class="hint">Last set all out: as many clean reps as you can.${toAttempts(b, ui.week) ? ' Your re-max attempts build from it.' : ''} ${testFeeds(b, ui.week)}</p>
+    ${bandList(bands)}
+  </section>`;
+}
+
+// The set sheet's note on a test set: "All out: 5–6 holds your max, 7+ raises it."
+function testNote(session) {
+  const { b, hold, raise, keep } = testAim(session);
+  const aim = keep === null ? 'as many as you can'
+    : toAttempts(b, ui.week) ? `your re-max attempts build from it, and ${keep}+ says your max is right`
+      : hold && raise ? `${repSpan(hold)} holds your max, ${raise.from}+ raises it`
+        : hold ? `${repSpan(hold)} holds your max` : `${raise.from}+ raises your max`;
+  return `All out: ${aim}. Count every clean rep you got.`;
+}
+
 // Logged sets light up like meet judging lights: white for a good set, red for a short one.
 function setLight(session, index, i, reps) {
-  const target = prescription(session.kind, ui.week).reps;
   const test = isTestSet(session, ui.week, i);
+  // A test set goes all out, so it aims for the fewest reps that keep the max, not the template's reps.
+  const aim = test ? testAim(session) : null;
+  const target = aim?.keep ?? prescription(session.kind, ui.week).reps;
   let cls = test ? 'set is-heavy' : 'set';
   let text = test ? `${target}+` : String(target);
-  let label = `Set ${i + 1}, ${test ? `as many reps as you can, target ${target}` : plural(target, 'rep')}, not logged`;
+  let label = `Set ${i + 1}, ${test ? `all out, ${target} or more ${aim.keeps}` : plural(target, 'rep')}, not logged`;
   if (reps !== null) {
     cls += reps >= target ? ' is-good' : ' is-short';
     text = reps > target ? `${reps}<sup>+${reps - target}</sup>` : String(reps);
@@ -1396,14 +1471,13 @@ function maxStats() {
         : { raise: 'you’re ahead of it', hold: 'about right', lower: 'it’s ahead of you' }[c.change];
       return `Week ${c.week + 1}${state.blocks.length > 1 ? ` of block ${c.block + 1}` : ''}: ${fmt(c.weight)} × ${c.reps} estimates ${fmt(Math.round(c.estimate))}, ${pct(c.ratio)} of the ${fmt(c.max)} max: ${what}.`;
     };
-    const band = (x) => `<li class="band is-${x.change}"><strong>${x.to === null ? `${x.from}+` : x.from === x.to ? x.from : `${x.from}–${x.to}`}</strong><span>${x.change === 'hold' ? 'hold' : signed(x.by)}</span></li>`;
-    const ahead = next && (next.week === FIRST_TEST ? 'Its reps move the max for weeks 4–8:' : b.finish === 'deload' ? "Its reps set next block's max:" : 'What its reps say about the max:');
+    const ahead = next && testFeeds(b, next.week);
     return `<li class="check-row">
       <span class="check-name">${l.short}</span><span class="check-max">${fmt(weekMax(b, l.id, currentWeek(b), state))}</span>
       ${track}
       ${latest ? `<p class="check-said">${said(latest)}</p>` : ''}
       ${next ? `<p class="check-next">Week ${next.week + 1} test set, ${fmt(next.weight)} × ${WEEKS[next.week].base.reps}+. ${ahead}</p>
-        <ol class="band-list" aria-label="Reps on the test set, and the change to the max">${next.bands.map(band).join('')}</ol>` : ''}
+        ${bandList(next.bands)}` : ''}
     </li>`;
   }).join('');
   return `<section class="chart-block">
@@ -1585,16 +1659,7 @@ function timeHistory() {
     </tr>`;
   }).join('');
   // Each exercise over every timed set: the lifts by name, accessories by id, a deleted one left out.
-  const totals = new Map();
-  for (const { session, time } of all) {
-    for (const p of time.parts) {
-      const key = p.part === 'lift' ? `lift:${session.lift}` : p.part;
-      const t = totals.get(key) ?? { ms: 0, sets: 0, days: 0 };
-      Object.assign(t, { ms: t.ms + p.ms, sets: t.sets + p.sets, days: t.days + 1 });
-      totals.set(key, t);
-    }
-  }
-  const rows = [...totals].map(([key, t]) => {
+  const rows = [...partTimes(state)].map(([key, t]) => {
     const name = key.startsWith('lift:') ? `${LIFTS.find((l) => l.id === key.slice(5)).name}, with warm-up` : exerciseById(key)?.name;
     return name && { name: esc(name), perDay: t.ms / t.days, perSet: t.ms / t.sets, days: t.days };
   }).filter(Boolean).sort((a, b) => b.perDay - a.perDay).map((r) => `<li class="time-row">
@@ -1977,15 +2042,126 @@ function latestIndex(kind) {
   return 0;
 }
 
+// ---------- Workout pane ----------
+
+// While a day is under way the rest timer's bar stays up between rests: how long the workout has run, the sets
+// done, about how long is left and what's next. A rest takes the bar back while it runs, with the workout's time
+// beside what's next. Tapping it goes to the day, at what's next.
+const workoutPane = document.getElementById('workout');
+const restClock = document.getElementById('rest-clock');
+let workoutStart = null;
+let workoutTicking = null;
+
+// Today's training day while it runs: started, or with a set logged, and neither ended nor skipped.
+function liveDay() {
+  const b = block();
+  if (!b) return null;
+  for (const [week, days] of b.log.entries()) {
+    for (const [index, session] of days.entries()) {
+      if (session.date !== todayISO() || session.ended || session.skipped) continue;
+      const time = workoutTime(session);
+      if (time) return { week, index, session, start: time.start };
+    }
+  }
+  return null;
+}
+
+// The Train helpers read the week shown; the pane works its day out in that day's own week.
+function inWeek(week, fn) {
+  const shown = ui.week;
+  ui.week = week;
+  try {
+    return fn();
+  } finally {
+    ui.week = shown;
+  }
+}
+
+// A set's time before a timed day gives it one: its rest, then this for the set and setting up.
+const SET_MS = 45000;
+
+// The day's sets, done and in all, about how long the rest take (each at its pace on the days timed, rest
+// included), and the next one: the lift's, else the accessory open or under way, else the first left in the list.
+function dayStatus({ week, index, session }) {
+  const tapped = ui.week === week && ui.open === index ? ui.extraOpen : undefined;
+  return inWeek(week, () => {
+    const paces = partTimes(state);
+    const pace = (key, seconds) => (paces.has(key) ? paces.get(key).ms / paces.get(key).sets : seconds * 1000 + SET_MS);
+    let done = 0;
+    let total = session.reps.length;
+    let left = 0;
+    session.reps.forEach((r, s) => {
+      if (r !== null) done += 1;
+      else left += pace(`lift:${session.lift}`, restSeconds(session, week, s));
+    });
+    const groups = dayGroups(state, session);
+    for (const e of groups.flat()) {
+      const entry = entryOf(session, e.id);
+      if (entry?.skipped) continue;
+      const count = setCount(e, entry);
+      const logged = entry?.sets.filter(Boolean).length ?? 0;
+      total += count;
+      done += logged;
+      left += (count - logged) * pace(e.id, e.rest);
+    }
+    const lift = session.reps.indexOf(null);
+    if (lift !== -1) return { done, total, left, next: nextLabel(session, lift, true) };
+    const open = openGroup(session, groups, tapped);
+    for (const group of [groups.find((g) => g[0].id === open), ...groups].filter(Boolean)) {
+      const next = groupNext(session, index, group);
+      if (next) return { done, total, left, next: extraNextLabel(next), group: group[0].id };
+    }
+    return { done, total, left, next: null };
+  });
+}
+
+// "42:10", or "1:02:45" past the hour.
+function stopwatch(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const two = (n) => String(n).padStart(2, '0');
+  return s < 3600 ? `${Math.floor(s / 60)}:${two(s % 60)}` : `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}`;
+}
+
+function paintWorkout() {
+  const live = liveDay();
+  const status = live && dayStatus(live);
+  // With every set done, a started day waits for End workout; one never started is simply over.
+  const on = Boolean(status) && (status.next !== null || Boolean(live.session.started));
+  workoutPane.hidden = !on;
+  restClock.hidden = !on;
+  document.body.classList.toggle('is-working', on);
+  clearInterval(workoutTicking);
+  workoutStart = on ? Date.parse(live.start) : null;
+  if (!on) return;
+  workoutTicking = setInterval(tickWorkout, 1000);
+  tickWorkout();
+  const finished = status.next === null;
+  document.getElementById('workout-sets').textContent = finished ? 'Every set done' : `${status.done} of ${plural(status.total, 'set')}`;
+  document.getElementById('workout-left').textContent = finished ? ''
+    : `About ${spanText(Math.max(1, Math.round(status.left / 300000)) * 300000)} to go`;
+  document.getElementById('workout-fill').style.transform = `scaleX(${status.total ? status.done / status.total : 1})`;
+  document.getElementById('workout-end').hidden = !finished;
+  document.getElementById('workout-next').textContent = finished ? 'End it so the day counts in History → Time.' : status.next;
+}
+
+function tickWorkout() {
+  const text = stopwatch(Date.now() - workoutStart);
+  document.getElementById('workout-time').textContent = text;
+  restClock.textContent = text;
+}
+
 // ---------- Sheets ----------
 
 const sessionAt = (index) => block().log[ui.week][index];
 
-function nextLabel(session, next) {
+// "Next: set 2 of 3, 245 lb"; `named` puts the lift first, for the workout pane.
+function nextLabel(session, next, named = false) {
   const weight = `${fmt(setWeight(block(), session, ui.week, next, state))} ${state.unit}`;
-  if (session.kind === 'max') return `Next: ${ATTEMPT_NAMES[next].toLowerCase()} attempt, ${weight}`;
-  const test = isTestSet(session, ui.week, next) ? ', as many reps as you can' : '';
-  return `Next: set ${next + 1} of ${session.reps.length}, ${weight}${test}`;
+  const head = `Next: ${named ? `${liftOf(session).name}, ` : ''}`;
+  if (session.kind === 'max') return `${head}${ATTEMPT_NAMES[next].toLowerCase()} attempt, ${weight}`;
+  const aim = isTestSet(session, ui.week, next) ? testAim(session) : null;
+  const test = !aim ? '' : aim.keep === null ? ', as many reps as you can' : `, all out, ${aim.keep}+ holds`;
+  return `${head}set ${next + 1} of ${session.reps.length}, ${weight}${test}`;
 }
 
 // A newly logged set starts the rest before the next one; the day's last set ends any rest under way.
@@ -2128,11 +2304,12 @@ function openReps(index, set) {
     const test = isTestSet(session, ui.week, set);
     document.getElementById('reps-title').textContent = `${liftOf(session).name}, set ${set + 1}`;
     document.getElementById('reps-note').textContent = test
-      ? `Target ${target}. Count every clean rep you got.`
+      ? testNote(session)
       : `Target ${plural(target, 'rep')}. How many did you get?`;
-    // Test sets can run long, so they get a wider range.
+    // Test sets can run long, so they get a wider range, marked at the fewest reps that keep the max.
+    const mark = (test && testAim(session).keep) || target;
     repGrid.innerHTML = Array.from({ length: target + (test ? 11 : 6) }, (_, n) => `
-      <button class="rep${n === target ? ' is-target' : ''}" data-action="reps-pick" data-reps="${n}"
+      <button class="rep${n === mark ? ' is-target' : ''}" data-action="reps-pick" data-reps="${n}"
         aria-pressed="${n === current}">${n}</button>`).join('');
   }
   repsSheet.showModal();
@@ -2195,18 +2372,28 @@ function logExtra(index, exercise, set, value) {
   if (value) markTrained(session);
   save();
   if (!fresh) return;
-  // In a superset the next set alternates between the two; a single exercise is a group of one.
   const group = dayGroups(state, session).find((g) => g.includes(exercise)) ?? [exercise];
+  const next = groupNext(session, index, group);
+  if (!next) return rest.stop();
+  // Within a superset round there's only the move to the other exercise; the full rest comes after the round.
+  const seconds = next.exercise !== exercise && next.set === set ? 15 : Math.max(...group.map((e) => e.rest));
+  rest.start(seconds, extraNextLabel(next));
+}
+
+// A group's next set to do, with the weight it's prefilled with, or null once every set is done or skipped. In a
+// superset the sets alternate between the two; a single exercise is a group of one.
+function groupNext(session, index, group) {
   const counts = group.map((e) => (entryOf(session, e.id)?.skipped ? 0 : setCount(e, entryOf(session, e.id))));
   const next = supersetOrder(counts).find(({ which, set: s }) => !entryOf(session, group[which].id)?.sets[s]);
-  if (!next) return rest.stop();
-  const ahead = group[next.which];
-  const { plan } = extraPlan(session, index, ahead);
-  const { weight } = extraTarget(ahead, entryOf(session, ahead.id), plan, next.set);
-  // Within a superset round there's only the move to the other exercise; the full rest comes after the round.
-  const seconds = ahead !== exercise && next.set === set ? 15 : Math.max(...group.map((e) => e.rest));
-  rest.start(seconds, `Next: ${ahead.name}, set ${next.set + 1} of ${counts[next.which]}${weight === null ? '' : `, ${loadText(ahead, weight)}${isCounted(ahead) ? ' a side' : ` ${state.unit}`}`}`);
+  if (!next) return null;
+  const exercise = group[next.which];
+  const { plan } = extraPlan(session, index, exercise);
+  const { weight } = extraTarget(exercise, entryOf(session, exercise.id), plan, next.set);
+  return { exercise, set: next.set, count: counts[next.which], weight };
 }
+
+const extraNextLabel = ({ exercise: e, set, count, weight }) => `Next: ${e.name}, set ${set + 1} of ${count}${weight === null ? ''
+  : `, ${loadText(e, weight)}${isCounted(e) ? ' a side' : ` ${state.unit}`}`}`;
 
 function openPick(index) {
   const session = sessionAt(index);
@@ -2580,12 +2767,16 @@ const FORMS = {
 // ---------- Events ----------
 
 const ACTIONS = {
-  // `data-to` names a part of the tab to scroll to.
+  // `data-to` names a part of the tab to scroll to. Train opens where it was left (see trainSpot); tapped while
+  // it's showing, it goes to the top.
   tab(el) {
+    const from = ui.tab;
+    if (from === 'train' && el.dataset.tab !== 'train') markTrainSpot();
     Object.assign(ui, { tab: el.dataset.tab, reviewing: false });
     render();
     const to = el.dataset.to && document.getElementById(el.dataset.to);
     if (to) to.scrollIntoView();
+    else if (ui.tab === 'train' && from !== 'train') backToTrainSpot();
     else scrollTop();
   },
   'skip-missed'() {
@@ -2603,8 +2794,10 @@ const ACTIONS = {
     render();
   },
   // A warm-up step ticked off, or back on. The first tick on the day being trained starts the workout clock, as
-  // Start workout does; a day already done or from an earlier day just keeps the tick.
+  // Start workout does, and the last step's tick starts the rest before the first set; a day already under way,
+  // done or from an earlier day just keeps the tick.
   warmup(el) {
+    rest.prime();
     const index = Number(el.dataset.index);
     const step = Number(el.dataset.step);
     const session = sessionAt(index);
@@ -2613,13 +2806,16 @@ const ACTIONS = {
     ticks[step] = ticks[step] ? null : nowISO();
     if (ticks.every((t) => t === null)) delete session.warmups;
     else session.warmups = ticks;
-    const starts = ticks[step] && !session.started && sessionStatus(session) === 'todo' && (!session.date || session.date === todayISO());
+    const ahead = ticks[step] && sessionStatus(session) === 'todo' && (!session.date || session.date === todayISO());
+    const starts = ahead && !session.started;
+    const rests = ahead && 'last' in el.dataset;
     if (starts) {
       session.started = nowISO();
       markTrained(session);
     }
     save();
     render();
+    if (rests) rest.start(warmupRest(session), nextLabel(session, 0));
     if (starts) toast('Workout started.');
   },
   feel(el) {
@@ -2827,6 +3023,27 @@ const ACTIONS = {
     render();
     toast(`Workout ended, ${spanText(workoutTime(session).total)}.${left ? ` ${plural(left, 'accessory')} not finished ${left === 1 ? 'was' : 'were'} skipped.` : ''}`);
   },
+  // The workout pane: Train, on the day under way, at what's next (the accessory opened), or at End once it's all done.
+  'workout-open'() {
+    const live = liveDay();
+    if (!live) return;
+    const status = dayStatus(live);
+    if (ui.week !== live.week || ui.open !== live.index) ui.extraOpen = undefined;
+    Object.assign(ui, { tab: 'train', reviewing: false, week: live.week, open: live.index });
+    if (status.group) ui.extraOpen = status.group;
+    render();
+    const to = view.querySelector(status.next === null ? `[data-key="workout-end-${live.index}"]`
+      : status.group ? '.extra.is-open' : '.attempts, .sets');
+    if (to) to.scrollIntoView({ block: 'center' });
+    else scrollTop();
+  },
+  // End on the workout pane, once every set is done or skipped: the day's End workout, from any tab.
+  'workout-finish'() {
+    const live = liveDay();
+    if (!live) return;
+    Object.assign(ui, { week: live.week, open: live.index });
+    ACTIONS['workout-end']({ dataset: { index: live.index } });
+  },
   'workout-reopen'(el) {
     delete sessionAt(Number(el.dataset.index)).ended;
     save();
@@ -2965,8 +3182,8 @@ const ACTIONS = {
     ui.reviewing = false;
     render();
   },
-  'rest-add'() {
-    rest.add(30);
+  'rest-add'(el) {
+    rest.add(Number(el.dataset.seconds));
   },
   'rest-stop'() {
     rest.stop();
@@ -3190,6 +3407,7 @@ document.addEventListener('visibilitychange', () => {
     worker.update().catch(() => {});
   }
   tickElapsed();
+  paintWorkout();
   newDay();
 });
 

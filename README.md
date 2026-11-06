@@ -26,7 +26,8 @@ counts each lift's heavy days by how they felt.
 
 Each day's warm-up is a list to tick off: the empty bar, then the steps up to the working weight (or the re-max
 opener, or the taper week's heavy single), each with its plates a side. The first tick on the day being trained
-starts the workout clock, like **Start workout**.
+starts the workout clock, like **Start workout**, and ticking the last step starts the rest timer before the first
+set (or the opener): the first set's rest, or 3 minutes after the taper week's heavy single.
 
 ## The 8-week block
 
@@ -65,6 +66,10 @@ the Epley and Brzycki formulas. That estimate moves the max it was lifted from:
 (kg: +2.5 / +3.75 / +5, bench +1.25 / +2 / +2.5.) An accurate max gives about 6 reps at 82.5%, so
 just 1–2 extra reps on a "2+" set means the max is set too high.
 
+On Train, the test set's light shows the fewest reps that keep the max (usually 5+ in week 3, 4+ in
+week 6) and turns red under it. Until it's logged, the reps for its weight and what each does sit under
+the sets; the rep picker and the rest before it say the same.
+
 - **Week 3's set** sets the max for weeks 4–8, right away. The app shows the new number when you log it.
 - **Next block's max**, in order of evidence:
   1. A good re-max single. If it's more than 5% under the week 6 estimate, it's taken as an off day
@@ -94,9 +99,10 @@ ACSM 2009):
 | 90–92.5%                    | 3:30  | 4:00  | 4:00     |
 | before a "2+" set or attempt | 4:00 | 5:00  | 5:00     |
 
-The screen stays on while it runs and the bar turns white when rest is over. One tone plays at
-10 seconds left and three at zero. Tones only play while the app is open (iPhone pauses web apps in
-the background) and follow the ring/silent switch: getting past it would mean stopping your music.
+**−30 s** and **+30 s** take time off or add it; taking off the last of it ends the rest. The screen
+stays on while it runs and the bar turns white when rest is over. One tone plays at 10 seconds left
+and three at zero. Tones only play while the app is open (iPhone pauses web apps in the background)
+and follow the ring/silent switch: getting past it would mean stopping your music.
 **Settings → Rest timer** sets Sound, Silent or Off.
 
 Every logged set records the weight lifted, so changing a setting or a max later never rewrites past
@@ -122,7 +128,11 @@ arrows put a day's exercises in the order you do them.
   numbers, and the one you used last comes up next time.
 - Double progression: each set is prefilled from last time with one more rep, until every set
   reaches the top of the range; then the weight goes up by the jump and reps start from the bottom.
-  Tap a light to log it as shown; tap a logged one to change it. Use 0 for body-weight exercises.
+  Two sessions in a row at one weight that average under the bottom of the range bring it down about
+  10%, in jumps, to build back up from (never to 10 lb or less, which reads as plates a side).
+  Tap a light to log it as shown; tap a logged one to change it. Use 0 for body-weight exercises:
+  once every set reaches the top, the plan adds the smallest plate over 10 lb you have (or the
+  jump, if it's bigger) and starts again from the bottom.
 - Weeks 7 and 8 (the taper, then the re-max or deload) are lighter: half the sets, rounded up, repeating
   last time's weights and reps so the main lifts are fresh. The block after picks up progression from
   the last full week.
@@ -158,6 +168,18 @@ and each accessory or superset, with the rest and setting up before a set counte
 it was for. A day left running ends at its last set once you log on a later day, and **Reopen** on the
 same day clears an End tapped too soon. **History → Time** averages this over your days, for planning
 shorter ones.
+
+While a day is under way (from Start workout or its first set, until End workout), the rest timer's bar
+stays up between rests on every tab but PRs: how long the workout has run, the sets done out of the
+day's (skipped exercises left out), about how long the rest will take and what's next with its weight.
+The estimate goes by each exercise's time a set on the days timed, rest included, or its rest plus 45
+seconds before it has one. A rest takes the bar back while it runs, with the workout's time beside
+what's next. Tapping the bar goes to the day on Train, at what's next. Once every set is done or
+skipped, it offers **End** until you tap it.
+
+Train keeps its place: open another tab mid-workout and coming back puts you where you were, on the same
+row even if something above it changed (an exercise added in Settings, say). Tapping **Train** while
+you're on it goes to the top.
 
 Apple Health isn't reachable from a web app, so body weight is logged in the app (History → Body). Until it's
 logged in a week, the day due shows **Log body weight**, which takes it on the same keypad as the sets.

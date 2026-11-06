@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { newBlock, emptyState, convertState, upgrade, isValidState, estimateMax } from '../logic.js';
 import {
-  newExercise, dayExtras, dayGroups, setLink, supersetOrder, ensureEntry, entryOf, exerciseHistory, lastTime,
+  newExercise, dayExtras, dayGroups, setLink, supersetOrder, ensureEntry, entryOf, exerciseHistory, lastTime, earlierTimes,
   defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras, finishExtras, plannedSets, isNewBest, muscleSets,
-  isCounted, countedPlates, weightOf, loadOf, looksCounted, countInPlates, workoutTime, timedSessions, exercisesByDay, moveExercise,
+  isCounted, countedPlates, weightOf, loadOf, looksCounted, countInPlates, workoutTime, timedSessions, partTimes, exercisesByDay, moveExercise,
 } from '../extras.js';
 
 const MAX = { squat: 385, bench: 315, deadlift: 455 };
@@ -73,21 +73,62 @@ test('last time is per variant and only looks at earlier days', () => {
   assert.equal(lastTime(state, press.id, 'Dumbbell', [0, 1, 0]).sets.length, 3);
   assert.equal(lastTime(state, press.id, 'Machine', [0, 1, 0]).sets[0].weight, 120);
   assert.equal(lastTime(state, press.id, 'Dumbbell', [0, 0, 0]), null); // nothing before week 1 Monday
+  assert.equal(earlierTimes(state, press.id, 'Machine', [0, 1, 0]).length, 1);
   assert.equal(defaultVariant(state, press), 'Machine'); // the variant used most recently
   assert.equal(exerciseHistory(state, press.id).length, 2);
 });
 
 test('double progression adds a rep a set, then weight once every set tops out', () => {
   const ex = { sets: 3, low: 8, high: 12, step: 5 };
-  assert.deepEqual(suggestion(ex, null), { weights: [null, null, null], reps: [8, 8, 8], up: false });
+  assert.deepEqual(suggestion(ex, null), { weights: [null, null, null], reps: [8, 8, 8], change: null });
   const mid = suggestion(ex, { sets: [{ weight: 50, reps: 12 }, { weight: 50, reps: 11 }, { weight: 50, reps: 7 }] });
-  assert.deepEqual(mid, { weights: [50, 50, 50], reps: [12, 12, 8], up: false });
+  assert.deepEqual(mid, { weights: [50, 50, 50], reps: [12, 12, 8], change: null });
   const top = suggestion(ex, { sets: [{ weight: 50, reps: 12 }, { weight: 50, reps: 12 }, { weight: 50, reps: 13 }] });
-  assert.deepEqual(top, { weights: [55, 55, 55], reps: [8, 8, 8], up: true });
+  assert.deepEqual(top, { weights: [55, 55, 55], reps: [8, 8, 8], change: 'up' });
   // Two sets logged of three: not every set reached the top, so the weight holds.
-  assert.equal(suggestion(ex, { sets: [{ weight: 50, reps: 12 }, { weight: 50, reps: 12 }] }).up, false);
-  // Body-weight work keeps adding reps past the range instead of suggesting weight.
-  assert.deepEqual(suggestion(ex, { sets: Array(3).fill({ weight: 0, reps: 12 }) }), { weights: [0, 0, 0], reps: [13, 13, 13], up: false });
+  assert.equal(suggestion(ex, { sets: [{ weight: 50, reps: 12 }, { weight: 50, reps: 12 }] }).change, null);
+});
+
+test('body-weight work climbs to the top of the range, then takes its first weight', () => {
+  const ex = { sets: 3, low: 8, high: 12, step: 5 };
+  const bw = (...reps) => ({ sets: reps.map((r) => ({ weight: 0, reps: r })) });
+  assert.deepEqual(suggestion(ex, bw(15, 4, 7)), { weights: [0, 0, 0], reps: [12, 8, 8], change: null });
+  // A 5 lb jump would read as plates a side, so it's the smallest plate over 10 lb there is.
+  assert.deepEqual(suggestion(ex, bw(12, 12, 13), 0, 'lb', { sizes: [45, 25, 10, 5, 2.5] }), { weights: [25, 25, 25], reps: [8, 8, 8], change: 'add' });
+  assert.equal(suggestion(ex, bw(12, 12, 12), 0, 'lb', { sizes: [45, 10, 5] }).weights[0], 45);
+  assert.equal(suggestion({ ...ex, step: 15 }, bw(12, 12, 12)).weights[0], 15);
+  assert.equal(suggestion({ ...ex, step: 2.5 }, bw(12, 12, 12), 0, 'kg').weights[0], 2.5);
+  // Not with a set short of the top, or in a lighter week.
+  assert.equal(suggestion(ex, bw(12, 12, 11)).change, null);
+  assert.equal(suggestion(ex, bw(12, 12, 12), 6).change, null);
+});
+
+test('two sessions in a row at one weight averaging under the range take it down about 10%', () => {
+  const ex = { sets: 3, low: 8, high: 12, step: 5 };
+  const short = { sets: [{ weight: 190, reps: 10 }, { weight: 190, reps: 7 }, { weight: 190, reps: 6 }] };
+  // Short once: the weight holds and asks for the bottom of the range.
+  assert.deepEqual(suggestion(ex, short), { weights: [190, 190, 190], reps: [11, 8, 8], change: null });
+  // Twice: 10% of 190 in 5 lb jumps is 20, from the bottom of the range.
+  assert.deepEqual(suggestion(ex, short, 0, 'lb', { prior: short }), { weights: [170, 170, 170], reps: [8, 8, 8], change: 'down' });
+  // Not when the time before was at another weight, nor in a lighter week, nor when the average reaches the bottom.
+  assert.equal(suggestion(ex, short, 0, 'lb', { prior: { sets: [{ weight: 200, reps: 6 }] } }).change, null);
+  assert.equal(suggestion(ex, short, 6, 'lb', { prior: short }).change, null);
+  const level = { sets: [{ weight: 190, reps: 10 }, { weight: 190, reps: 8 }, { weight: 190, reps: 6 }] };
+  assert.equal(suggestion(ex, level, 0, 'lb', { prior: short }).change, null);
+  // Each set comes down the same, so a drop set keeps its steps.
+  const drops = { sets: [{ weight: 97.5, reps: 6 }, { weight: 87.5, reps: 6 }, { weight: 77.5, reps: 6 }] };
+  assert.deepEqual(suggestion(ex, drops, 0, 'lb', { prior: drops }).weights, [87.5, 77.5, 67.5]);
+  // At least one jump, but never to 10 lb or less, which reads as plates a side.
+  const small = { sets: Array(3).fill({ weight: 20, reps: 5 }) };
+  assert.deepEqual(suggestion(ex, small, 0, 'lb', { prior: small }).weights, [15, 15, 15]);
+  const smaller = { sets: Array(3).fill({ weight: 15, reps: 5 }) };
+  assert.deepEqual(suggestion(ex, smaller, 0, 'lb', { prior: smaller }), { weights: [15, 15, 15], reps: [8, 8, 8], change: null });
+  // Plates a side come down in the exercise's jump: 3.5 (45 + 45 + 45 + 25) to 3, but one plate can't go to none.
+  const sled = { counted: true, sets: 3, low: 6, high: 10, step: 0.5 };
+  const heavy = { sets: Array(3).fill({ weight: 3.5, reps: 4 }) };
+  assert.deepEqual(suggestion(sled, heavy, 0, 'lb', { prior: heavy }).weights, [3, 3, 3]);
+  const one = { sets: Array(3).fill({ weight: 1, reps: 4 }) };
+  assert.equal(suggestion({ ...sled, step: 1 }, one, 0, 'lb', { prior: one }).change, null);
 });
 
 test('weeks 7 and 8 halve the sets and repeat last time, and progression skips over them', () => {
@@ -95,7 +136,7 @@ test('weeks 7 and 8 halve the sets and repeat last time, and progression skips o
   assert.deepEqual([0, 5, 6, 7].map((w) => plannedSets(ex, w)), [3, 3, 2, 2]);
   assert.equal(plannedSets({ ...ex, sets: 1 }, 6), 1);
   const topped = { sets: [{ weight: 50, reps: 12 }, { weight: 50, reps: 12 }, { weight: 50, reps: 12 }] };
-  assert.deepEqual(suggestion(ex, topped, 6), { weights: [50, 50], reps: [12, 12], up: false });
+  assert.deepEqual(suggestion(ex, topped, 6), { weights: [50, 50], reps: [12, 12], change: null });
   assert.deepEqual(suggestion(ex, { sets: [{ weight: 50, reps: 9 }, { weight: 50, reps: 8 }] }, 7).reps, [9, 8]);
   const { state, press, b } = setup();
   ensureEntry(b.log[5][0], press, 'Dumbbell').sets = [{ weight: 50, reps: 12 }, { weight: 50, reps: 12 }, { weight: 50, reps: 11 }];
@@ -284,6 +325,14 @@ test('a timed day runs from start to end, each set counted toward the exercise i
   assert.deepEqual(workoutTime(mon).parts.map((p) => p.part), ['lift', press.id]);
   assert.equal(workoutTime(b.log[0][1]), null);
   assert.equal(timedSessions(state).length, 1);
+  // Each exercise's time adds up across the days timed, the lift by name.
+  const thu = b.log[0][3];
+  thu.started = t(0);
+  ensureEntry(thu, press, 'Dumbbell').sets = [{ weight: 50, reps: 10, at: t(4) }, null, null];
+  const parts = partTimes(state);
+  assert.deepEqual(parts.get('lift:squat'), undefined);
+  assert.deepEqual(parts.get(`lift:${mon.lift}`), { ms: 21 * 60000, sets: 3, days: 1 });
+  assert.deepEqual(parts.get(press.id), { ms: 11 * 60000, sets: 3, days: 2 });
 });
 
 test('workout times that do not read as times are dropped, keeping the sets', () => {

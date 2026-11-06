@@ -146,15 +146,18 @@ export function start(seconds, next) {
   holdScreen(true);
 }
 
+// Negative seconds take time off, down to zero, which ends the rest. Rest already over has nothing to take off.
 export function add(seconds) {
   if (!timer) return;
   const left = Math.max(0, timer.end - Date.now());
-  timer = { ...timer, end: Date.now() + left + seconds * 1000, total: Math.max(timer.total, Math.ceil(left / 1000) + seconds) };
-  warned = Math.ceil(left / 1000) + seconds <= WARN_AT;
+  if (seconds < 0 && left === 0) return;
+  const after = Math.max(0, left + seconds * 1000);
+  timer = { ...timer, end: Date.now() + after, total: Math.max(timer.total, Math.ceil(after / 1000)) };
+  warned = Math.ceil(after / 1000) <= WARN_AT;
   rang = false;
   write();
   paint();
-  holdScreen(true);
+  holdScreen(after > 0);
 }
 
 export function stop() {

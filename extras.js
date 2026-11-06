@@ -1,6 +1,6 @@
 // Accessory exercises: the lifter's own list, logged with each training day and progressed by rep range
 // (double progression). No DOM access here so it can be tested in Node.
-import { LIFTS, SCHEDULE, BAR, PLATES, FEELS, FINISH_WEEK, estimateMax, tidy } from './logic.js';
+import { LIFTS, SCHEDULE, BAR, PLATES, FEELS, FINISH_WEEK, estimateMax, tidy, roundTo } from './logic.js';
 import { picKeys } from './pics.js';
 
 export const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -191,12 +191,16 @@ export function exerciseHistory(state, id) {
 
 const before = (at, here) => !at || at[0] < here[0] || (at[0] === here[0] && (at[1] < here[1] || (at[1] === here[1] && at[2] < here[2])));
 
-// The most recent earlier session with this exercise and variant, or null. `full` passes over the lighter
-// weeks, for the session to progress from.
-export function lastTime(state, id, variant, here, full = false) {
-  const earlier = exerciseHistory(state, id)
+// Every earlier session with this exercise and variant, oldest first. `full` passes over the lighter weeks, for
+// the sessions to progress from.
+export function earlierTimes(state, id, variant, here, full = false) {
+  return exerciseHistory(state, id)
     .filter((h) => h.variant === variant && before(h.at, here) && !(full && h.at && isLightWeek(h.at[1])));
-  return earlier[earlier.length - 1] ?? null;
+}
+
+// The most recent earlier session with this exercise and variant, or null.
+export function lastTime(state, id, variant, here, full = false) {
+  return earlierTimes(state, id, variant, here, full).pop() ?? null;
 }
 
 // Whether a day's sets beat every earlier session of the same variant: a higher estimated max, or more reps
@@ -220,27 +224,59 @@ export function defaultVariant(state, exercise) {
   return last && exercise.variants.includes(last.variant) ? last.variant : exercise.variants[0];
 }
 
+// Two sessions in a row at one weight that average under the bottom of the range take it down about this much.
+export const DROP = 0.1;
+
+const heaviestSet = (sets, exercise, unit) =>
+  sets.reduce((a, s) => (weightOf(exercise, s.weight, unit) > weightOf(exercise, a.weight, unit) ? s : a));
+const fellShort = (sets, exercise) => sets.reduce((sum, s) => sum + s.reps, 0) < exercise.low * sets.length;
+
+// A logged number less `drop`, or null when that's body weight or less, or in lb a number only typed as plates a
+// side (see looksCounted).
+function lowered(exercise, weight, drop, unit) {
+  const floor = isCounted(exercise) || unit !== 'lb' ? 0 : PLATES_UP_TO;
+  return weight - drop > floor ? tidy(weight - drop) : null;
+}
+
+// The first weight added to body-weight work: the exercise's jump, but in lb never a number only typed as plates a
+// side, so at least the smallest plate over 10 lb the lifter has (a belt or vest takes plates).
+export function addedWeight(exercise, unit, sizes = PLATES[unit]) {
+  if (isCounted(exercise) || unit !== 'lb' || exercise.step > PLATES_UP_TO) return exercise.step;
+  const over = (list) => list.filter((p) => p > PLATES_UP_TO).pop();
+  return over(sizes) ?? over(PLATES.lb);
+}
+
 // Double progression: keep the weight and add a rep per set until every set reaches the top of the range,
-// then add a step of weight and start again from the bottom. Body-weight work (logged as 0) just keeps
-// adding reps. In a lighter week it's fewer sets, repeating last time.
-export function suggestion(exercise, last, week = 0, unit = 'lb') {
+// then add a step of weight and start again from the bottom (`change` 'up'). Body-weight work (logged as 0)
+// climbs the range the same way, then takes its first weight ('add'). When last time and the time before
+// (`prior`) were at the same weight and both averaged under the bottom of the range, the weight comes down
+// about DROP, in steps, and starts again from the bottom ('down'). In a lighter week it's fewer sets,
+// repeating last time. `sizes` are the plates the lifter has (logic.js plateSizes).
+export function suggestion(exercise, last, week = 0, unit = 'lb', { prior = null, sizes = PLATES[unit] } = {}) {
   const n = plannedSets(exercise, week);
   const light = isLightWeek(week);
-  if (!last) return { weights: Array(n).fill(null), reps: Array(n).fill(exercise.low), up: false };
+  const restart = (weights, change) => ({ weights, reps: Array(n).fill(exercise.low), change });
+  if (!last) return restart(Array(n).fill(null), null);
   const sets = last.sets;
   const loaded = sets.some((s) => s.weight > 0);
-  const up = !light && loaded && sets.length >= exercise.sets && sets.every((s) => s.reps >= exercise.high);
-  if (up) {
-    const heaviest = sets.reduce((a, s) => (weightOf(exercise, s.weight, unit) > weightOf(exercise, a.weight, unit) ? s : a));
-    const weight = tidy(heaviest.weight + exercise.step);
-    return { weights: Array(n).fill(weight), reps: Array(n).fill(exercise.low), up };
-  }
   const at = (i) => sets[Math.min(i, sets.length - 1)];
-  const top = loaded ? exercise.high : 100;
+  if (!light && sets.length >= exercise.sets && sets.every((s) => s.reps >= exercise.high)) {
+    if (!loaded) return restart(Array(n).fill(addedWeight(exercise, unit, sizes)), 'add');
+    return restart(Array(n).fill(tidy(heaviestSet(sets, exercise, unit).weight + exercise.step)), 'up');
+  }
+  const heaviest = heaviestSet(sets, exercise, unit);
+  const same = prior && weightOf(exercise, heaviestSet(prior.sets, exercise, unit).weight, unit) === weightOf(exercise, heaviest.weight, unit);
+  if (!light && loaded && same && fellShort(sets, exercise) && fellShort(prior.sets, exercise)) {
+    // Each set comes down by the same amount, so a drop set keeps its steps; a set that can't stays.
+    const drop = Math.max(exercise.step, roundTo(heaviest.weight * DROP, exercise.step));
+    if (lowered(exercise, heaviest.weight, drop, unit) !== null) {
+      return restart(Array.from({ length: n }, (_, i) => lowered(exercise, at(i).weight, drop, unit) ?? at(i).weight), 'down');
+    }
+  }
   return {
     weights: Array.from({ length: n }, (_, i) => at(i).weight),
-    reps: Array.from({ length: n }, (_, i) => Math.min(top, Math.max(exercise.low, light ? at(i).reps : (sets[i]?.reps ?? exercise.low - 1) + 1))),
-    up,
+    reps: Array.from({ length: n }, (_, i) => Math.min(exercise.high, Math.max(exercise.low, light ? at(i).reps : (sets[i]?.reps ?? exercise.low - 1) + 1))),
+    change: null,
   };
 }
 
@@ -339,6 +375,20 @@ export function timedSessions(state) {
     }
   }
   return out;
+}
+
+// Each exercise's time over every timed set, rest included: the lifts by name ('lift:squat'), accessories by id,
+// with the number of sets and days it's spread over.
+export function partTimes(state) {
+  const totals = new Map();
+  for (const { session, time } of timedSessions(state)) {
+    for (const p of time.parts) {
+      const key = p.part === 'lift' ? `lift:${session.lift}` : p.part;
+      const t = totals.get(key) ?? { ms: 0, sets: 0, days: 0 };
+      totals.set(key, { ms: t.ms + p.ms, sets: t.sets + p.sets, days: t.days + 1 });
+    }
+  }
+  return totals;
 }
 
 // Body weight entries stay one per day, oldest first.

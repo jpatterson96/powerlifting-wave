@@ -95,26 +95,31 @@ export function maxChecks(state, liftId) {
   return out;
 }
 
-// The current block's next test set of one lift that's still to come, with what each count of reps would say:
-// runs of rep counts that lower, hold or raise the max (and by how much), the last run open-ended.
+// What each count of reps on one lift's test set in a block's `week` would say: runs of rep counts that lower,
+// hold or raise the max (and by how much), the last run open-ended.
+export function testBands(b, liftId, week, state) {
+  const s = b.log[week].find((x) => x.lift === liftId && x.kind === 'base');
+  const weight = setWeight(b, s, week, s.reps.length - 1, state);
+  const max = weekMax(b, liftId, week, state);
+  const bands = [];
+  for (let reps = 1; reps <= 12; reps++) {
+    const { change, value } = adjustMax(max, estimateMax(weight, reps), liftId, state);
+    const by = tidy(value - max);
+    const last = bands[bands.length - 1];
+    if (last && last.change === change && last.by === by) last.to = reps;
+    else bands.push({ from: reps, to: reps, change, by });
+  }
+  bands[bands.length - 1].to = null;
+  return { weight, max, bands };
+}
+
+// The current block's next test set of one lift that's still to come, with its bands (see testBands).
 export function nextTest(state, liftId) {
   const b = state.blocks[state.blocks.length - 1];
   for (const week of [FIRST_TEST, SECOND_TEST]) {
     const s = b.log[week].find((x) => x.lift === liftId && x.kind === 'base');
     if (!s || s.skipped || s.reps[s.reps.length - 1] !== null) continue;
-    const set = s.reps.length - 1;
-    const weight = setWeight(b, s, week, set, state);
-    const max = weekMax(b, liftId, week, state);
-    const bands = [];
-    for (let reps = 1; reps <= 12; reps++) {
-      const { change, value } = adjustMax(max, estimateMax(weight, reps), liftId, state);
-      const by = tidy(value - max);
-      const last = bands[bands.length - 1];
-      if (last && last.change === change && last.by === by) last.to = reps;
-      else bands.push({ from: reps, to: reps, change, by });
-    }
-    bands[bands.length - 1].to = null;
-    return { week, weight, max, bands };
+    return { week, ...testBands(b, liftId, week, state) };
   }
   return null;
 }

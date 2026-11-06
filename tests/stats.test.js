@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { newBlock, emptyState, LB_PER_KG } from '../logic.js';
 import { newExercise, ensureEntry } from '../extras.js';
-import { DOTS, dots, strength, gains, maxChecks, nextTest, consistency, totals, accessoryTrends, STUCK_AFTER } from '../stats.js';
+import { DOTS, dots, strength, gains, maxChecks, nextTest, testBands, consistency, totals, accessoryTrends, STUCK_AFTER } from '../stats.js';
 
 const MAX = { squat: 385, bench: 315, deadlift: 455 };
 
@@ -80,6 +80,8 @@ test('the next test set lists what each rep count does to the max', () => {
   assert.equal(check.by, 5);
   assert.ok(check.ratio > 1 && check.ratio < 1.02);
   assert.equal(nextTest(state, 'squat').week, 5);
+  // Week 6's runs a rep lower, at 85% of the max week 3 moved to.
+  assert.deepEqual(testBands(b, 'squat', 5, state).bands.map((x) => [x.from, x.change]), [[1, 'lower'], [4, 'hold'], [6, 'raise'], [7, 'raise'], [8, 'raise']]);
   // A skipped test is passed over.
   day(b, 5, 'Tuesday').skipped = true;
   assert.equal(nextTest(state, 'squat'), null);

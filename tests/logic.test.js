@@ -5,6 +5,7 @@ import {
   warmups, REMAX_RAMP, estimateMax, adjustMax, weekMax, attemptWeight, setWeight, singleWeight, restSeconds, newBlock,
   setFinish, finishFor, sessionStatus, weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak,
   restartBlock, evaluateLift, liftHistory, maxChanges, liftRecord, totalHistory, convertState, isValidState, upgrade, emptyState,
+  dayPct, heatOf, liftPath,
 } from '../logic.js';
 
 const MAX = { squat: 405, bench: 285, deadlift: 495 };
@@ -42,6 +43,31 @@ test('target weights follow both waves, the taper and the deload finish', () => 
   const b = newBlock(MAX, '2026-11-02');
   assert.equal(singleWeight(b, base(b, 6, 'squat'), 6, LB), 365); // 90%: 364.5
   assert.equal(singleWeight(b, b.log[6][3], 6, LB), null);
+});
+
+test('a day\'s heat runs from the deload\'s 60% to the third re-max attempt', () => {
+  const b = newBlock(MAX, '2026-11-02', 'remax');
+  const deload = newBlock(MAX, '2026-11-02', 'deload');
+  assert.equal(dayPct(b.log[0][3], 0), 0.775);
+  assert.equal(dayPct(base(b, 6, 'bench'), 6), 0.9); // the taper's single, not its 80% doubles
+  assert.equal(dayPct(b.log[7][0], 7), 1.02);
+  assert.equal(dayPct(deload.log[7][0], 7), 0.6);
+  assert.equal(heatOf(0.6), 0);
+  assert.equal(heatOf(1.02), 1);
+  assert.equal(heatOf(0.81), 0.5);
+  assert.equal(heatOf(0.5), 0);
+});
+
+test('a lift\'s path through the block is each of its days\' top weight', () => {
+  const b = newBlock(MAX, '2026-11-02', 'remax');
+  const path = liftPath(b, 'bench', LB);
+  assert.equal(path.length, 15); // Monday and Thursday for 7 weeks, then the re-max Monday
+  assert.deepEqual(path[0], { week: 0, index: 0, weight: 200, pct: 0.7 }); // 70% of 285: 199.5
+  assert.equal(path.find((d) => d.week === 6).weight, 255); // the taper's 90% single, over its 80% doubles
+  assert.equal(path.at(-1).weight, 290); // third attempt, 102%: 290.7
+  b.log[7][0].reps = [1, 1, 0];
+  assert.equal(liftPath(b, 'bench', LB).at(-1).weight, 275); // the second, the best made
+  assert.ok(liftPath(b, 'deadlift', LB).every((d) => b.log[d.week][d.index].lift === 'deadlift'));
 });
 
 test('a training max takes 90% of the real max', () => {

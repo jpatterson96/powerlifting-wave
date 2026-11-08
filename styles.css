@@ -52,6 +52,48 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
+/* ---------- Block heat ---------- */
+
+/* The navy leans toward how hard the day on screen is (app.js paintHeat sets the chroma and hue from its planned
+   top %): indigo on a light day, through violet, plum and oxblood, to ember on a re-max, and teal on a deload.
+   Registered so a change of day glides. The PRs show keeps the plain navy. */
+@property --tint-c {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.035;
+}
+
+@property --tint-h {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 255;
+}
+
+@supports (color: oklch(0 0 0)) {
+  :root.is-heat {
+    --bg: oklch(0.235 var(--tint-c) var(--tint-h));
+    --surface: oklch(0.275 var(--tint-c) var(--tint-h));
+    --line: oklch(0.355 calc(var(--tint-c) * 0.9) var(--tint-h));
+    transition: --tint-c 0.8s, --tint-h 0.8s;
+  }
+
+  /* A little lighter at the top, fixed so it stays put while the page scrolls. */
+  :root.is-heat body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: linear-gradient(180deg, oklch(0.27 calc(var(--tint-c) * 1.15) var(--tint-h)), transparent 46%);
+    pointer-events: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root.is-heat {
+    transition: none;
+  }
+}
+
 button {
   font: inherit;
   color: inherit;
@@ -805,6 +847,52 @@ legend.setting-title + * {
 /* One side of the bar, collar on the left, loaded outward. */
 .barbell {
   margin-top: 14px;
+}
+
+/* The lift's block behind its weight and bar (app.js liftGraph, which sets its height): edge to edge, from above
+   the number down to the bar. */
+.lift-stage {
+  position: relative;
+  isolation: isolate;
+}
+
+.lift-graph {
+  position: absolute;
+  right: -20px;
+  bottom: 22px;
+  left: -20px;
+  z-index: -1;
+  width: calc(100% + 40px);
+  overflow: visible;
+  pointer-events: none;
+}
+
+.lift-graph text {
+  font: 700 13px var(--display);
+  fill: var(--muted);
+}
+
+.lift-graph-done,
+.lift-graph-next,
+.lift-graph-stem {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.lift-graph-done {
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.lift-graph-next {
+  stroke-width: 1.5;
+  stroke-dasharray: 3 5;
+  opacity: 0.4;
+}
+
+.lift-graph-stem {
+  stroke-width: 1;
+  opacity: 0.45;
 }
 
 .bar {
@@ -2386,6 +2474,7 @@ legend.setting-title + * {
   padding: 0 max(8px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(8px, env(safe-area-inset-left));
   border-top: 1px solid var(--line);
   background: rgba(20, 32, 46, 0.94);
+  background: color-mix(in oklab, var(--bg) 94%, transparent);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }

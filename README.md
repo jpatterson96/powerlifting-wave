@@ -24,6 +24,13 @@ heavy day's sets are all logged the app asks how they moved: **Easy** (5+ left),
 (0–1). A second grind on the same lift in a block offers a 90% training max in one tap, and the block review
 counts each lift's heavy days by how they felt.
 
+The background follows how heavy the day on screen is, from its top set's share of the max: the navy leans
+indigo on a 70% day, then violet and plum, oxblood by week 6's 92.5% singles and ember on re-max day, and turns teal
+on a deload. Tapping another day or week moves it; History and Settings take today's day, and PRs keeps its plain
+navy. Behind the day's weight and bar, a graph shows that lift's top weight on each of its days in the block, in
+the same colours: solid up to the day on screen, which glows, and dotted after it, ending on the block's last
+weight. On a re-max day it sits behind the bar under the attempts.
+
 Each day's warm-up is a list to tick off: the empty bar, then the steps up to the working weight (or the re-max
 opener, or the taper week's heavy single), each with its plates a side. The first tick on the day being trained
 starts the workout clock, like **Start workout**, and ticking the last step starts the rest timer before the first

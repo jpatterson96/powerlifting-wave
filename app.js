@@ -4,7 +4,7 @@ import {
   singleWeight, restSeconds, platesPerSide, warmups, emptyState, newBlock, finishFor, setFinish, sessionStatus,
   weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak, restartBlock, evaluateLift, liftHistory,
   maxChanges, liftRecord, convertState, upgrade, PLATES, plateSizes, dueSession, missedSessions, FEELS, GRINDS, heavyFeel,
-  touched, testResult,
+  touched, testResult, dayPct, heatOf, liftPath,
 } from './logic.js';
 import {
   WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, SMALL_PLATES, isCounted, countedPlates, weightOf, loadOf, PLATES_UP_TO, GUESSED_STEP, looksCounted, countInPlates, isLightWeek, plannedSets, newExercise,
@@ -26,7 +26,7 @@ import {
 
 const KEY = 'powerlifting-wave';
 // The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
-const VERSION = 'wave-v22';
+const VERSION = 'wave-v23';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -251,7 +251,51 @@ function render() {
     else view.innerHTML = ui.reviewing ? reviewView() : trainView();
   }
   paintWorkout();
+  paintHeat();
   if (focusKey) view.querySelector(`[data-key="${focusKey}"]`)?.focus({ preventScroll: true });
+}
+
+// ---------- Block heat ----------
+
+// The page's navy leans toward how hard the day on screen is: indigo on a light day, then violet, plum and
+// oxblood, to ember on a re-max, and teal on a deload. Stops are OKLCH [heat, lightness, chroma, hue] with the hue
+// unwrapped so it never doubles back. The graph behind the day's weight uses them as they are; the page only as a
+// dark tint (styles.css, :root.is-heat).
+const HEAT = [
+  [0, 0.62, 0.09, 215],
+  [0.24, 0.56, 0.15, 262],
+  [0.45, 0.56, 0.19, 302],
+  [0.6, 0.59, 0.21, 345],
+  [0.76, 0.64, 0.21, 383],
+  [0.89, 0.72, 0.19, 405],
+  [1, 0.82, 0.16, 428],
+];
+
+function heatColour(t) {
+  let i = 1;
+  while (i < HEAT.length - 1 && HEAT[i][0] < t) i++;
+  const [t0, ...from] = HEAT[i - 1];
+  const [t1, ...to] = HEAT[i];
+  const k = Math.min(1, Math.max(0, (t - t0) / (t1 - t0)));
+  return from.map((v, j) => v + (to[j] - v) * k);
+}
+
+const oklch = ([l, c, h]) => `oklch(${l.toFixed(3)} ${c.toFixed(3)} ${(h % 360).toFixed(1)})`;
+
+// The day the colour follows: the one open on Train, else the one due today. The PRs show keeps its own stage.
+function paintHeat() {
+  const root = document.documentElement;
+  const b = state.blocks.length ? block() : null;
+  root.classList.toggle('is-heat', Boolean(b) && ui.tab !== 'prs');
+  if (!b || ui.tab === 'prs') return;
+  const open = ui.tab === 'train' && ui.week !== null && ui.open != null;
+  const at = open ? { week: ui.week, index: ui.open } : dueSession(b, todayISO()) ?? { week: b.log.length - 1, index: 0 };
+  const session = b.log[at.week]?.[at.index];
+  if (!session) return;
+  const t = heatOf(dayPct(session, at.week));
+  // The tint stops at ember: past it the dark shades turn brown.
+  root.style.setProperty('--tint-c', (0.02 + 0.045 * t).toFixed(3));
+  root.style.setProperty('--tint-h', Math.min(heatColour(t)[2], 390).toFixed(1));
 }
 
 // Both waves and the re-max, as one double wave.
@@ -739,12 +783,15 @@ function sessionBody(b, session, i) {
   return `<div class="session-body">
     <p class="lift-scheme">${p.sets} × ${p.reps} at ${tidy(p.pct * 100)}% of ${fmt(work)}${state.trainingMax ? ' (training max)' : ''}. Rest ${restText(restSeconds(session, ui.week, 1))} between sets.</p>
     ${movedNote}
-    <button class="lift-weight" data-action="weight" data-index="${i}" data-key="weight-${i}"
-        aria-label="${lift.name}, ${fmt(shown)} ${state.unit}. Change weight">
-      <span class="lift-num">${fmt(shown)}</span><span class="lift-unit">${state.unit}</span>
-    </button>
-    ${session.weight !== null && session.weight !== target ? `<p class="lift-target">Target is ${fmt(target)}</p>` : ''}
-    ${barbell(shown)}
+    <div class="lift-stage">
+      ${liftGraph(b, session, i)}
+      <button class="lift-weight" data-action="weight" data-index="${i}" data-key="weight-${i}"
+          aria-label="${lift.name}, ${fmt(shown)} ${state.unit}. Change weight">
+        <span class="lift-num">${fmt(shown)}</span><span class="lift-unit">${state.unit}</span>
+      </button>
+      ${session.weight !== null && session.weight !== target ? `<p class="lift-target">Target is ${fmt(target)}</p>` : ''}
+      ${barbell(shown)}
+    </div>
     ${warmupList(session, i, ramp, single ? `The last is one heavy single at ${tidy(p.single * 100)}%. Rest ${SINGLE_REST / 60} minutes after it, before your sets.` : '')}
     ${isHeavyDay(session) ? '<p class="hint">Heavy day: stop each set with 2–4 reps left in the tank.</p>' : ''}
     <div class="sets" role="group" aria-label="${lift.name} sets">
@@ -1151,12 +1198,70 @@ function remaxBody(b, session, i) {
     <p class="lift-scheme">Attempts are built from ${fmt(base)}, ${fromTest ? 'the estimate from your week 6 test set' : 'your max'}. Rest ${restText(restSeconds(session, ui.week, 1))} before each attempt.</p>
     ${warmupList(session, i, ramp, 'Rest 2–3 minutes between warm-ups.')}
     <ol class="attempts">${attempts}</ol>
-    ${loading !== null ? barbell(weights[loading], ATTEMPT_NAMES[loading]) : ''}
+    ${loading !== null ? `<div class="lift-stage">${liftGraph(b, session, i, GRAPH_BAR_H)}${barbell(weights[loading], ATTEMPT_NAMES[loading])}</div>` : ''}
     <p class="hint">Pick the third from how the second moved: fast, go for ${fmt(weights[2])}; slow, take about ${fmt(slow)}; a grind, stop there and mark the third a pass.</p>
     ${best !== null ? `<p class="remax-best">Best good lift <strong>${fmt(best)}</strong> ${state.unit}</p>` : ''}
     ${skipButton(session, i)}
     ${extrasSection(session, i)}
   </div>`;
+}
+
+// The day's lift across the block, behind its weight and bar: each of its days' top weight, coloured by how hard
+// the day is, solid up to the day on screen and dotted after it, with the block's last weight at the end. A re-max
+// day has no big number, so its graph is shorter and sits behind just the bar.
+const GRAPH_H = 210;
+const GRAPH_BAR_H = 104;
+
+function smoothPath(points) {
+  const at = (i) => points[Math.max(0, Math.min(points.length - 1, i))];
+  let d = `M${points[0].map((v) => v.toFixed(1)).join(' ')}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const [p0, p1, p2, p3] = [at(i - 1), at(i), at(i + 1), at(i + 2)];
+    const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+    const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+    d += ` C${[...c1, ...c2, ...p2].map((v) => v.toFixed(1)).join(' ')}`;
+  }
+  return d;
+}
+
+function liftGraph(b, session, i, H = GRAPH_H) {
+  const days = liftPath(b, session.lift, state);
+  const at = days.findIndex((d) => d.week === ui.week && d.index === i);
+  if (days.length < 2 || at === -1) return '';
+  const W = Math.min(window.innerWidth, 560);
+  const weights = days.map((d) => d.weight);
+  const lo = Math.min(...weights) * 0.97;
+  const hi = Math.max(...weights) * 1.012;
+  const x = (k) => 24 + (k / (days.length - 1)) * (W - 48);
+  const y = (w) => H - 14 - ((w - lo) / (hi - lo || 1)) * (H - 40);
+  const points = days.map((d, k) => [x(k), y(d.weight)]);
+  const line = smoothPath(points);
+  const [tx, ty] = points[at].map((v) => v.toFixed(1));
+  const now = oklch(heatColour(heatOf(days[at].pct)));
+  const stops = days.map((d, k) => `<stop offset="${(k / (days.length - 1)).toFixed(4)}" stop-color="${oklch(heatColour(heatOf(d.pct)))}"/>`).join('');
+  const end = points.at(-1);
+  const last = at === days.length - 1 ? ''
+    : `<text x="${(end[0] - 10).toFixed(1)}" y="${(end[1] + 4).toFixed(1)}" text-anchor="end">${fmt(weights.at(-1))}</text>`;
+  return `<svg class="lift-graph" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px" aria-hidden="true">
+    <defs>
+      <linearGradient id="lift-graph-line" gradientUnits="userSpaceOnUse" x1="24" y1="0" x2="${W - 24}" y2="0">${stops}</linearGradient>
+      <linearGradient id="lift-graph-fill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="${now}" stop-opacity="0.22"/><stop offset="0.9" stop-color="${now}" stop-opacity="0"/>
+      </linearGradient>
+      <radialGradient id="lift-graph-halo">
+        <stop offset="0" stop-color="${now}" stop-opacity="0.6"/><stop offset="1" stop-color="${now}" stop-opacity="0"/>
+      </radialGradient>
+      <clipPath id="lift-graph-done"><rect width="${tx}" height="${H}"/></clipPath>
+      <clipPath id="lift-graph-next"><rect x="${tx}" width="${W}" height="${H}"/></clipPath>
+    </defs>
+    <path d="${line} L${end[0].toFixed(1)} ${H} L${points[0][0].toFixed(1)} ${H} Z" fill="url(#lift-graph-fill)" clip-path="url(#lift-graph-done)"/>
+    <path class="lift-graph-next" d="${line}" stroke="url(#lift-graph-line)" clip-path="url(#lift-graph-next)"/>
+    <path class="lift-graph-done" d="${line}" stroke="url(#lift-graph-line)" clip-path="url(#lift-graph-done)"/>
+    ${last}
+    <line class="lift-graph-stem" x1="${tx}" y1="${ty}" x2="${tx}" y2="${H}" stroke="${now}"/>
+    <circle cx="${tx}" cy="${ty}" r="26" fill="url(#lift-graph-halo)"/>
+    <circle cx="${tx}" cy="${ty}" r="5" fill="${now}"/>
+  </svg>`;
 }
 
 function barbell(total, attempt) {

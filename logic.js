@@ -227,6 +227,40 @@ export function singleWeight(block, session, week, state) {
   return single ? roundTo(workingMax(weekMax(block, session.lift, week, state), state) * single, state.round) : null;
 }
 
+// How hard a day is planned: the heaviest share of the max it asks for. The last set's %, the taper's heavy single,
+// or the third re-max attempt.
+export function dayPct(session, week) {
+  if (session.kind === 'max') return ATTEMPTS[ATTEMPTS.length - 1];
+  const p = prescription(session.kind, week);
+  return Math.max(p.pct, p.single ?? 0);
+}
+
+// That share as the background's heat, 0 to 1: the deload's 60% is 0 and the third re-max attempt is 1.
+export function heatOf(pct) {
+  const top = ATTEMPTS[ATTEMPTS.length - 1];
+  return tidy(Math.min(1, Math.max(0, (pct - DELOAD.pct) / (top - DELOAD.pct))));
+}
+
+// One lift's days through a block, in order, for the graph behind the day's weight: each day's top weight (as
+// planned or entered) and its planned share of the max. A re-max day counts its best good attempt once one is made,
+// else the third.
+export function liftPath(block, liftId, state) {
+  const days = [];
+  block.log.forEach((sessions, week) => sessions.forEach((session, index) => {
+    if (session.lift === liftId) days.push({ week, index, weight: topWeight(block, session, week, state), pct: dayPct(session, week) });
+  }));
+  return days;
+}
+
+function topWeight(block, session, week, state) {
+  const weights = session.reps.map((_, set) => setWeight(block, session, week, set, state));
+  if (session.kind === 'max') {
+    const good = weights.filter((_, a) => session.reps[a] === 1);
+    return good.length ? Math.max(...good) : weights.at(-1);
+  }
+  return Math.max(weights.at(-1), singleWeight(block, session, week, state) ?? 0);
+}
+
 // How a heavy day's sets moved, picked once they're all logged. Heavy days should leave 2-4 reps in the tank;
 // GRINDS grinds on one lift in a block say its max is set too high.
 export const FEELS = ['easy', 'smooth', 'grind'];

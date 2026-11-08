@@ -54,37 +54,55 @@ body {
 
 /* ---------- Block heat ---------- */
 
-/* The navy leans toward how hard the day on screen is (app.js paintHeat sets the chroma and hue from its planned
-   top %): indigo on a light day, through violet, plum and oxblood, to ember on a re-max, and teal on a deload.
+/* A glow rises from the bottom of the screen with how hard the day on screen is (app.js paintHeat sets the colour
+   and --heat-t, 0 to 1, from its planned top %): blue on a light day, through violet and magenta, to ember at
+   week 6's singles and gold on a re-max, and teal on a deload. The heavier the day, the higher and brighter.
    Registered so a change of day glides. The PRs show keeps the plain navy. */
-@property --tint-c {
+@property --heat-t {
   syntax: "<number>";
   inherits: true;
-  initial-value: 0.035;
+  initial-value: 0.3;
 }
 
-@property --tint-h {
+@property --heat-l {
   syntax: "<number>";
   inherits: true;
-  initial-value: 255;
+  initial-value: 0.56;
+}
+
+@property --heat-c {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.15;
+}
+
+@property --heat-h {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 262;
 }
 
 @supports (color: oklch(0 0 0)) {
   :root.is-heat {
-    --bg: oklch(0.235 var(--tint-c) var(--tint-h));
-    --surface: oklch(0.275 var(--tint-c) var(--tint-h));
-    --line: oklch(0.355 calc(var(--tint-c) * 0.9) var(--tint-h));
-    transition: --tint-c 0.8s, --tint-h 0.8s;
+    transition: --heat-t 0.8s, --heat-l 0.8s, --heat-c 0.8s, --heat-h 0.8s;
   }
 
-  /* A little lighter at the top, fixed so it stays put while the page scrolls. */
+  /* Fixed, so it stays at the bottom of the screen while the page scrolls. */
   :root.is-heat body::before {
     content: "";
     position: fixed;
     inset: 0;
     z-index: -1;
-    background: linear-gradient(180deg, oklch(0.27 calc(var(--tint-c) * 1.15) var(--tint-h)), transparent 46%);
+    background: radial-gradient(130% calc(36% + 30% * var(--heat-t)) at 50% 100%,
+      oklch(var(--heat-l) var(--heat-c) var(--heat-h) / calc(0.2 + 0.26 * var(--heat-t))),
+      oklch(var(--heat-l) var(--heat-c) var(--heat-h) / calc(0.07 + 0.08 * var(--heat-t))) 55%,
+      transparent 100%);
     pointer-events: none;
+  }
+
+  /* See-through enough for the glow to show under the tabs. */
+  :root.is-heat .tabs {
+    background: oklch(0.2 calc(0.02 + 0.04 * var(--heat-t)) var(--heat-h) / 0.72);
   }
 }
 
@@ -2474,7 +2492,6 @@ legend.setting-title + * {
   padding: 0 max(8px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(8px, env(safe-area-inset-left));
   border-top: 1px solid var(--line);
   background: rgba(20, 32, 46, 0.94);
-  background: color-mix(in oklab, var(--bg) 94%, transparent);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }

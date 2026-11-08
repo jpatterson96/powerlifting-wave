@@ -26,7 +26,7 @@ import {
 
 const KEY = 'powerlifting-wave';
 // The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
-const VERSION = 'wave-v23';
+const VERSION = 'wave-v24';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -257,10 +257,10 @@ function render() {
 
 // ---------- Block heat ----------
 
-// The page's navy leans toward how hard the day on screen is: indigo on a light day, then violet, plum and
-// oxblood, to ember on a re-max, and teal on a deload. Stops are OKLCH [heat, lightness, chroma, hue] with the hue
-// unwrapped so it never doubles back. The graph behind the day's weight uses them as they are; the page only as a
-// dark tint (styles.css, :root.is-heat).
+// A glow rises from the bottom of the page with how hard the day on screen is: blue on a light day, then violet,
+// magenta and ember, to gold on a re-max, and teal on a deload (styles.css, :root.is-heat). Stops are OKLCH
+// [heat, lightness, chroma, hue] with the hue unwrapped so it never doubles back; the graph behind the day's weight
+// uses the same colours.
 const HEAT = [
   [0, 0.62, 0.09, 215],
   [0.24, 0.56, 0.15, 262],
@@ -293,9 +293,11 @@ function paintHeat() {
   const session = b.log[at.week]?.[at.index];
   if (!session) return;
   const t = heatOf(dayPct(session, at.week));
-  // The tint stops at ember: past it the dark shades turn brown.
-  root.style.setProperty('--tint-c', (0.02 + 0.045 * t).toFixed(3));
-  root.style.setProperty('--tint-h', Math.min(heatColour(t)[2], 390).toFixed(1));
+  const [l, c, h] = heatColour(t);
+  root.style.setProperty('--heat-t', t);
+  root.style.setProperty('--heat-l', l.toFixed(3));
+  root.style.setProperty('--heat-c', c.toFixed(3));
+  root.style.setProperty('--heat-h', h.toFixed(1));
 }
 
 // Both waves and the re-max, as one double wave.

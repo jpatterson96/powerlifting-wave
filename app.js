@@ -2,7 +2,7 @@ import {
   LIFTS, WEEKS, BLOCK_WEEKS, WAVE_TWO, FIRST_TEST, SECOND_TEST, FINISH_WEEK, ATTEMPTS, ATTEMPT_NAMES, REMAX_RAMP, BUMPS, isTestSet,
   prescription, ROUNDING, REST_MODES, BAR, tidy, roundTo, workingMax, targetWeight, estimateMax, weekMax, attemptBase, attemptWeight, setWeight,
   singleWeight, restSeconds, platesPerSide, warmups, emptyState, newBlock, finishFor, setFinish, sessionStatus,
-  weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak, restartBlock, evaluateLift, liftHistory,
+  weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, clearDay, longBreak, restartBlock, evaluateLift, liftHistory,
   maxChanges, liftRecord, convertState, upgrade, PLATES, plateSizes, dueSession, missedSessions, FEELS, GRINDS, heavyFeel,
   touched, testResult, dayPct, heatOf, liftPath, weekHeat,
 } from './logic.js';
@@ -26,7 +26,7 @@ import {
 
 const KEY = 'powerlifting-wave';
 // The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
-const VERSION = 'wave-v25';
+const VERSION = 'wave-v26';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -770,13 +770,31 @@ function tickElapsed() {
 }
 
 const skipButton = (session, i) => (sessionStatus(session) === 'done' ? ''
-  : `<button class="btn-quiet skip" data-action="skip" data-index="${i}" data-key="skip-${i}">Skip this day</button>`);
+  : `<button class="btn-quiet" data-action="skip" data-index="${i}" data-key="skip-${i}">Skip this day</button>`);
+
+// Anything on a day beyond a skip: a date, the clock, warm-ups, sets, attempts or accessories.
+const hasWork = (s) => Boolean(s.date || s.started || s.warmups) || touched({ ...s, skipped: false });
+
+// Clear this day, for one started by mistake: it erases everything done on the day (after asking).
+const clearButton = (session, i) => (hasWork(session)
+  ? `<button class="btn-quiet" data-action="day-clear" data-index="${i}" data-key="clear-${i}">Clear this day</button>` : '');
+
+function dayEnd(session, i) {
+  const buttons = skipButton(session, i) + clearButton(session, i);
+  return buttons ? `<div class="day-end">${buttons}</div>` : '';
+}
+
+// A day as the start warning and Clear this day name it: "week 8 Monday's bench re-max".
+const dayName = (week, s) => `week ${week + 1} ${s.day}'s ${liftOf(s).short.toLowerCase()}${s.kind === 'max' ? ' re-max' : ''}`;
 
 function sessionBody(b, session, i) {
   if (session.skipped) {
     return `<div class="session-body">
       <p class="hint">You skipped this day's ${liftOf(session).name.toLowerCase()}. It doesn't count toward your next max.</p>
-      <button class="btn-quiet" data-action="unskip" data-index="${i}" data-key="unskip-${i}">Undo skip</button>
+      <div class="day-end">
+        <button class="btn-quiet" data-action="unskip" data-index="${i}" data-key="unskip-${i}">Undo skip</button>
+        ${clearButton(session, i)}
+      </div>
       ${extrasSection(session, i)}
     </div>`;
   }
@@ -812,7 +830,7 @@ function sessionBody(b, session, i) {
     </div>
     ${testGuide(session)}
     ${isHeavyDay(session) && sessionStatus(session) === 'done' ? feelCheck(b, session, i) : ''}
-    ${skipButton(session, i)}
+    ${dayEnd(session, i)}
     ${extrasSection(session, i)}
   </div>`;
 }
@@ -1214,7 +1232,7 @@ function remaxBody(b, session, i) {
     ${loading !== null ? `<div class="lift-stage">${liftGraph(b, session, i, GRAPH_BAR_H)}${barbell(weights[loading], ATTEMPT_NAMES[loading])}</div>` : ''}
     <p class="hint">Pick the third from how the second moved: fast, go for ${fmt(weights[2])}; slow, take about ${fmt(slow)}; a grind, stop there and mark the third a pass.</p>
     ${best !== null ? `<p class="remax-best">Best good lift <strong>${fmt(best)}</strong> ${state.unit}</p>` : ''}
-    ${skipButton(session, i)}
+    ${dayEnd(session, i)}
     ${extrasSection(session, i)}
   </div>`;
 }
@@ -2889,6 +2907,18 @@ function markTrained(session) {
   }
 }
 
+// Starting a day ahead of today's one (a tap while looking at a later week, say) asks first. Today's day, one
+// missed before it and a day already under way never ask.
+function okToStart(index) {
+  const session = sessionAt(index);
+  if (session.date) return true;
+  const b = block();
+  const today = todayISO();
+  const due = dueSession(b, today);
+  if (!due || (due.week === ui.week && due.index === index) || isMissed(missedSessions(b, today), ui.week, index)) return true;
+  return confirm(`Start ${dayName(ui.week, session)}? Today's workout is ${dayName(due.week, b.log[due.week][due.index])}.`);
+}
+
 function logExtra(index, exercise, set, value) {
   const session = sessionAt(index);
   const variant = entryOf(session, exercise.id)?.variant ?? defaultVariant(state, exercise);
@@ -3334,6 +3364,7 @@ const ACTIONS = {
     const index = Number(el.dataset.index);
     const step = Number(el.dataset.step);
     const session = sessionAt(index);
+    if (!session.warmups?.[step] && !session.started && !okToStart(index)) return;
     const ticks = session.warmups ?? [];
     while (ticks.length <= step) ticks.push(null);
     ticks[step] = ticks[step] ? null : nowISO();
@@ -3404,6 +3435,7 @@ const ACTIONS = {
     const index = Number(el.dataset.index);
     const i = Number(el.dataset.set);
     const session = sessionAt(index);
+    if (!okToStart(index)) return;
     // One tap logs a normal set at target; test sets and re-max attempts always ask.
     if (session.reps[i] === null && session.kind !== 'max' && !isTestSet(session, ui.week, i)) {
       logSet(session, i, prescription(session.kind, ui.week).reps);
@@ -3500,6 +3532,7 @@ const ACTIONS = {
     const index = Number(el.dataset.index);
     const set = Number(el.dataset.set);
     const e = exerciseById(el.dataset.exercise);
+    if (!okToStart(index)) return;
     const { entry, plan } = extraPlan(sessionAt(index), index, e);
     const target = extraTarget(e, entry, plan, set);
     if (!entry?.sets[set] && target.weight !== null) {
@@ -3544,6 +3577,7 @@ const ACTIONS = {
   },
   // Starting dates the day (and closes earlier ones) the same as logging a set does.
   'workout-start'(el) {
+    if (!okToStart(Number(el.dataset.index))) return;
     const session = sessionAt(Number(el.dataset.index));
     session.started = nowISO();
     markTrained(session);
@@ -3588,6 +3622,19 @@ const ACTIONS = {
     save();
     render();
     toast('Reopened. Anything skipped stays skipped until you undo it.');
+  },
+  // A day started by mistake goes back to untouched: its sets, warm-ups, accessories, times and skip.
+  'day-clear'(el) {
+    const i = Number(el.dataset.index);
+    const name = dayName(ui.week, sessionAt(i));
+    if (!confirm(`Clear ${name}? Its sets, warm-ups, accessories and times are erased.`)) return;
+    const live = liveDay();
+    if (live?.week === ui.week && live.index === i) rest.stop();
+    clearDay(block(), ui.week, i);
+    ui.extraOpen = undefined;
+    save();
+    render();
+    toast(`Cleared ${name}.`);
   },
   // A skip that leaves the muscle's week short says so (the line on the row said it first); Undo is on the row.
   'extra-skip'(el) {

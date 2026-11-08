@@ -292,6 +292,11 @@ offers to skip it in one tap; **Not now** puts that off. Tap the day to do it in
 for or against your next max, and **Skip this day** on any day does the same (undo is available). If you skip most
 of a week, the app offers to repeat it; after two or more weeks off, it offers to restart the block at week 1.
 
+Starting a day ahead of today's (Start workout, a warm-up tick or a set on a later day, say while looking at
+week 8) asks first, naming the day due today. Today's day, a missed one and a day already under way never ask.
+**Clear this day** at the bottom of any day with something on it erases it all after asking (sets, attempts,
+warm-ups, accessories, times and the date), for a day started by mistake.
+
 ## Saving to GitHub
 
 The app can save the log to the private repository `jpatterson96/powerlifting-wave-data`

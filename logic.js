@@ -413,6 +413,14 @@ export function resetWeek(block, week) {
   block.log[week] = emptyWeek(week, block.log[week]);
 }
 
+// Puts one day back as it was before anything was done on it (sets, warm-ups, accessories, times, the date, a
+// skip), for a day started by mistake. The block's last day trained goes back to the latest day still dated.
+export function clearDay(block, week, index) {
+  block.log[week][index] = emptyWeek(week, [block.log[week][index]])[0];
+  const dates = block.log.flat().map((s) => s.date).filter(Boolean).sort();
+  block.lastTrained = dates[dates.length - 1] ?? null;
+}
+
 const dayNumber = (iso) => {
   const [y, m, d] = iso.split('-').map(Number);
   return Date.UTC(y, m - 1, d) / 86400000;

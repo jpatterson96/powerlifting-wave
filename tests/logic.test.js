@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   WEEKS, ATTEMPTS, FIRST_TEST, SECOND_TEST, FINISH_WEEK, prescription, roundTo, targetWeight, workingMax, platesPerSide,
   warmups, REMAX_RAMP, estimateMax, adjustMax, weekMax, attemptWeight, setWeight, singleWeight, restSeconds, newBlock,
-  setFinish, finishFor, sessionStatus, weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak,
+  setFinish, finishFor, sessionStatus, weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, clearDay, longBreak,
   restartBlock, evaluateLift, liftHistory, maxChanges, liftRecord, totalHistory, convertState, isValidState, upgrade, emptyState,
   dayPct, heatOf, liftPath, weekHeat,
 } from '../logic.js';
@@ -156,6 +156,24 @@ test('skipping most of a week offers to repeat it before the next week starts', 
   resetWeek(b, 0);
   assert.equal(sessionStatus(b.log[0][2]), 'todo');
   assert.equal(weekToRepeat(b), null);
+});
+
+test('clearing a day started by mistake leaves it untouched and dates the block from the days left', () => {
+  const b = newBlock(MAX, '2026-11-02');
+  Object.assign(b.log[0][0], { reps: [6, 6, 7], weight: 225, date: '2026-11-02' });
+  Object.assign(b.log[7][0], {
+    warmups: ['2026-11-08T13:33:54Z'], started: '2026-11-08T13:33:54Z', ended: '2026-11-08T13:34:06Z', date: '2026-11-08',
+    extras: [{ exercise: 'g01', variant: null, skipped: true, sets: [null, null, null] }],
+  });
+  b.lastTrained = '2026-11-08';
+  const empty = structuredClone(newBlock(MAX, '2026-11-02').log[7][0]);
+  clearDay(b, 7, 0);
+  assert.deepEqual(b.log[7][0], empty);
+  assert.equal(b.log[7][0].weights.length, 3);
+  assert.equal(b.lastTrained, '2026-11-02');
+  assert.equal(b.log[0][0].weight, 225);
+  clearDay(b, 0, 0);
+  assert.equal(b.lastTrained, null);
 });
 
 test('two weeks off offers a restart at week 1, once per break', () => {

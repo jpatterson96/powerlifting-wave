@@ -26,7 +26,7 @@ import {
 
 const KEY = 'powerlifting-wave';
 // The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
-const VERSION = 'wave-v26';
+const VERSION = 'wave-v27';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -40,6 +40,7 @@ const pastSheet = document.getElementById('past-sheet');
 const pastForm = document.getElementById('past-form');
 const restoreInput = document.getElementById('restore-input');
 const moment = document.getElementById('pr-moment');
+const askSheet = document.getElementById('ask-sheet');
 
 let state = load();
 // `open` is the index of the expanded day in the shown week; undefined means "pick the next day to train".
@@ -208,6 +209,36 @@ function toast(message) {
 function scrollTop() {
   window.scrollTo(0, 0);
 }
+
+// The app's own yes-or-no sheet, in place of the phone's confirm(): a title, what happens, and the two answers,
+// `danger` marking a yes that erases something. Resolves true for yes. Cancel, a tap on the backdrop or Escape is
+// a no, except that `must` holds it to the two buttons, for a no that does something itself.
+let answer = null;
+
+function ask({ title, text, yes, no = 'Cancel', danger = false, must = false }) {
+  if (askSheet.open) return Promise.resolve(false);
+  askSheet.querySelector('#ask-title').textContent = title;
+  askSheet.querySelector('#ask-text').textContent = text;
+  askSheet.querySelector('.ask-no').textContent = no;
+  const button = askSheet.querySelector('.ask-yes');
+  button.textContent = yes;
+  button.classList.toggle('is-danger', danger);
+  askSheet.toggleAttribute('data-must', must);
+  askSheet.returnValue = '';
+  askSheet.showModal();
+  return new Promise((resolve) => {
+    answer = resolve;
+  });
+}
+
+askSheet.addEventListener('close', () => {
+  answer?.(askSheet.returnValue === 'yes');
+  answer = null;
+});
+
+askSheet.addEventListener('cancel', (e) => {
+  if (askSheet.hasAttribute('data-must')) e.preventDefault();
+});
 
 // Where Train was left for another tab: the first row still on screen, by its data-key, and how far down the
 // screen it sat. Coming back puts that row in the same place, even if something above it changed meanwhile (an
@@ -2908,7 +2939,7 @@ function markTrained(session) {
 }
 
 // Starting a day ahead of today's one (a tap while looking at a later week, say) asks first. Today's day, one
-// missed before it and a day already under way never ask.
+// missed before it and a day already under way never ask. True, or a promise of the answer.
 function okToStart(index) {
   const session = sessionAt(index);
   if (session.date) return true;
@@ -2916,7 +2947,11 @@ function okToStart(index) {
   const today = todayISO();
   const due = dueSession(b, today);
   if (!due || (due.week === ui.week && due.index === index) || isMissed(missedSessions(b, today), ui.week, index)) return true;
-  return confirm(`Start ${dayName(ui.week, session)}? Today's workout is ${dayName(due.week, b.log[due.week][due.index])}.`);
+  return ask({
+    title: "Not today's workout",
+    text: `This is ${dayName(ui.week, session)}. Today's is ${dayName(due.week, b.log[due.week][due.index])}.`,
+    yes: 'Start anyway',
+  });
 }
 
 function logExtra(index, exercise, set, value) {
@@ -3130,8 +3165,13 @@ async function restore(file) {
     toast("That file isn't a Powerlifting Wave backup.");
     return;
   }
-  const replacing = state.blocks.length ? ' This replaces everything on this phone.' : '';
-  if (!confirm(`Restore ${plural(data.blocks.length, 'block')} from this backup?${replacing}`)) return;
+  const replacing = state.blocks.length > 0;
+  if (!(await ask({
+    title: 'Restore this backup?',
+    text: `It has ${plural(data.blocks.length, 'block')}.${replacing ? ' It replaces everything on this phone.' : ''}`,
+    yes: 'Restore',
+    danger: replacing,
+  }))) return;
   state = data;
   save();
   requestPersist();
@@ -3197,8 +3237,14 @@ const FORMS = {
       return toast(result.message);
     }
     const saved = upgradeAll(result.remote?.state);
-    const useSaved = saved && saved.blocks.length > 0 && (state.blocks.length === 0 || confirm(
-      `GitHub has a saved log with ${plural(saved.blocks.length, 'block')}. Replace this phone's log with it?\n\nCancel keeps this phone's log and saves it to GitHub instead.`));
+    // Either answer saves over one side, so a tap beside the sheet doesn't count as one.
+    const useSaved = saved && saved.blocks.length > 0 && (state.blocks.length === 0 || await ask({
+      title: 'Which log do you keep?',
+      text: `GitHub has a saved log with ${plural(saved.blocks.length, 'block')}. Use it on this phone, or keep this phone's log and save it to GitHub over that one.`,
+      yes: "Use GitHub's",
+      no: "Keep this phone's",
+      must: true,
+    }));
     if (useSaved) {
       // Written locally only: the log just came from GitHub, so there is nothing new to send back.
       state = saved;
@@ -3359,12 +3405,12 @@ const ACTIONS = {
   // A warm-up step ticked off, or back on. The first tick on the day being trained starts the workout clock, as
   // Start workout does, and the last step's tick starts the rest before the first set; a day already under way,
   // done or from an earlier day just keeps the tick.
-  warmup(el) {
+  async warmup(el) {
     rest.prime();
     const index = Number(el.dataset.index);
     const step = Number(el.dataset.step);
     const session = sessionAt(index);
-    if (!session.warmups?.[step] && !session.started && !okToStart(index)) return;
+    if (!session.warmups?.[step] && !session.started && !(await okToStart(index))) return;
     const ticks = session.warmups ?? [];
     while (ticks.length <= step) ticks.push(null);
     ticks[step] = ticks[step] ? null : nowISO();
@@ -3430,12 +3476,12 @@ const ACTIONS = {
     ui.open = i;
     render();
   },
-  set(el) {
+  async set(el) {
     rest.prime();
     const index = Number(el.dataset.index);
     const i = Number(el.dataset.set);
     const session = sessionAt(index);
-    if (!okToStart(index)) return;
+    if (!(await okToStart(index))) return;
     // One tap logs a normal set at target; test sets and re-max attempts always ask.
     if (session.reps[i] === null && session.kind !== 'max' && !isTestSet(session, ui.week, i)) {
       logSet(session, i, prescription(session.kind, ui.week).reps);
@@ -3527,12 +3573,12 @@ const ACTIONS = {
     renderPad();
   },
   // One tap logs an accessory set as planned once its weight is known; otherwise it asks.
-  'extra-set'(el) {
+  async 'extra-set'(el) {
     rest.prime();
     const index = Number(el.dataset.index);
     const set = Number(el.dataset.set);
     const e = exerciseById(el.dataset.exercise);
-    if (!okToStart(index)) return;
+    if (!(await okToStart(index))) return;
     const { entry, plan } = extraPlan(sessionAt(index), index, e);
     const target = extraTarget(e, entry, plan, set);
     if (!entry?.sets[set] && target.weight !== null) {
@@ -3551,14 +3597,19 @@ const ACTIONS = {
     render();
   },
   // Takes off the last set not done yet; when every set is logged, the last one, after asking.
-  'extra-set-remove'(el) {
+  async 'extra-set-remove'(el) {
     const session = sessionAt(Number(el.dataset.index));
     const e = exerciseById(el.dataset.exercise);
     const entry = entryFor(session, e, entryOf(session, e.id)?.variant ?? defaultVariant(state, e));
     const open = entry.sets.lastIndexOf(null);
     if (open === -1) {
       const last = entry.sets[entry.sets.length - 1];
-      if (!confirm(`Remove set ${entry.sets.length}, ${loadText(e, last.weight)} × ${last.reps}?`)) return;
+      if (!(await ask({
+        title: `Remove set ${entry.sets.length}?`,
+        text: `${e.name}, ${loadText(e, last.weight)}${isCounted(e) ? ' a side' : last.weight ? ` ${state.unit}` : ''} × ${last.reps}, already logged.`,
+        yes: 'Remove',
+        danger: true,
+      }))) return;
     }
     entry.sets.splice(open === -1 ? entry.sets.length - 1 : open, 1);
     save();
@@ -3576,8 +3627,8 @@ const ACTIONS = {
     if (short) toast(`Skipped the rest.${short}`);
   },
   // Starting dates the day (and closes earlier ones) the same as logging a set does.
-  'workout-start'(el) {
-    if (!okToStart(Number(el.dataset.index))) return;
+  async 'workout-start'(el) {
+    if (!(await okToStart(Number(el.dataset.index)))) return;
     const session = sessionAt(Number(el.dataset.index));
     session.started = nowISO();
     markTrained(session);
@@ -3624,10 +3675,15 @@ const ACTIONS = {
     toast('Reopened. Anything skipped stays skipped until you undo it.');
   },
   // A day started by mistake goes back to untouched: its sets, warm-ups, accessories, times and skip.
-  'day-clear'(el) {
+  async 'day-clear'(el) {
     const i = Number(el.dataset.index);
     const name = dayName(ui.week, sessionAt(i));
-    if (!confirm(`Clear ${name}? Its sets, warm-ups, accessories and times are erased.`)) return;
+    if (!(await ask({
+      title: 'Clear this day?',
+      text: `Everything on ${name} is erased: sets, warm-ups, accessories and times.`,
+      yes: 'Clear',
+      danger: true,
+    }))) return;
     const live = liveDay();
     if (live?.week === ui.week && live.index === i) rest.stop();
     clearDay(block(), ui.week, i);
@@ -3699,9 +3755,14 @@ const ACTIONS = {
     save();
     render();
   },
-  'exercise-delete'() {
+  async 'exercise-delete'() {
     const e = exerciseById(ui.editing.id);
-    if (!confirm(`Delete ${e.name}? It comes off your days and out of History. Sets already logged stay in your saved log.`)) return;
+    if (!(await ask({
+      title: `Delete ${e.name}?`,
+      text: 'It comes off your days and out of History. Sets already logged stay in your saved log.',
+      yes: 'Delete',
+      danger: true,
+    }))) return;
     setLink(state, e, null);
     state.exercises = state.exercises.filter((x) => x !== e);
     save();
@@ -3718,9 +3779,14 @@ const ACTIONS = {
   'past-edit'(el) {
     openPast(Number(el.dataset.past));
   },
-  'past-delete'() {
+  async 'past-delete'() {
     const p = state.pastMaxes[ui.past];
-    if (!confirm(`Delete your ${shortDate(p.date)} ${LIFTS.find((l) => l.id === p.lift).short.toLowerCase()} max of ${fmt(p.value)}?`)) return;
+    if (!(await ask({
+      title: 'Delete this max?',
+      text: `Your ${shortDate(p.date)} ${LIFTS.find((l) => l.id === p.lift).short.toLowerCase()} max of ${fmt(p.value)} ${state.unit}.`,
+      yes: 'Delete',
+      danger: true,
+    }))) return;
     state.pastMaxes = state.pastMaxes.filter((x) => x !== p);
     save();
     pastSheet.close();
@@ -3772,8 +3838,13 @@ const ACTIONS = {
     render();
     scrollTop();
   },
-  'restart-block'() {
-    if (!confirm("Clear this block's logged sets and start again at week 1? Your maxes stay the same.")) return;
+  async 'restart-block'() {
+    if (!(await ask({
+      title: 'Restart the block?',
+      text: "This block's logged sets are cleared and you start again at week 1. Your maxes stay the same.",
+      yes: 'Restart',
+      danger: true,
+    }))) return;
     restartBlock(block());
     save();
     rest.stop();
@@ -3817,7 +3888,12 @@ const ACTIONS = {
     const saved = upgradeAll(result.state);
     if (!saved || !saved.blocks.length) return toast("The copy on GitHub isn't a log this app can read.");
     const what = `${plural(saved.blocks.length, 'block')} and ${plural(saved.exercises.length, 'accessory exercise')}`;
-    if (!confirm(`Replace this phone's log with the copy on GitHub (${what})?`)) return;
+    if (!(await ask({
+      title: 'Load from GitHub?',
+      text: `This phone's log is replaced with the copy on GitHub: ${what}.`,
+      yes: 'Load',
+      danger: true,
+    }))) return;
     // Written locally only: it just came from GitHub, so there is nothing new to send back.
     state = saved;
     writeLocal();
@@ -3832,8 +3908,13 @@ const ACTIONS = {
     render();
     toast('Disconnected. Your log stays on this phone and on GitHub.');
   },
-  erase() {
-    if (!confirm("Erase every block on this phone? This can't be undone.")) return;
+  async erase() {
+    if (!(await ask({
+      title: 'Erase all data?',
+      text: "Every block on this phone is erased. This can't be undone.",
+      yes: 'Erase',
+      danger: true,
+    }))) return;
     state = { ...emptyState(state.unit), round: state.round, trainingMax: state.trainingMax, rest: state.rest };
     // Disconnect first so the empty log never overwrites the copy on GitHub.
     sync.disconnect();
@@ -3846,9 +3927,9 @@ const ACTIONS = {
 };
 
 document.addEventListener('click', (e) => {
-  // A tap on the dimmed backdrop lands on the dialog element itself.
+  // A tap on the dimmed backdrop lands on the dialog element itself. A question that must be answered stays.
   if (e.target instanceof HTMLDialogElement) {
-    e.target.close();
+    if (!e.target.hasAttribute('data-must')) e.target.close();
     return;
   }
   const el = e.target.closest('[data-action]');

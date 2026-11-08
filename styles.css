@@ -2879,6 +2879,35 @@ html:has(.sheet[open]) {
   margin-top: 18px;
 }
 
+/* The yes-or-no sheet: Cancel outlined in steel, the yes in chalk, or outlined red when it erases something. */
+.ask .sheet-note {
+  margin-bottom: 22px;
+}
+
+.ask-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.ask-actions .btn {
+  padding: 8px 12px;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.ask-no {
+  border: 1.5px solid var(--steel);
+  background: none;
+  color: var(--chalk);
+}
+
+.ask-yes.is-danger {
+  border: 1.5px solid var(--red);
+  background: none;
+  color: var(--red-text);
+}
+
 /* ---------- Rest timer: sits above the tabs and turns white, like a good-lift light, when rest is over ---------- */
 
 .rest {

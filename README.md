@@ -29,7 +29,7 @@ bottom of the screen, blue on a 70% day, then violet and magenta, ember by week 
 re-max day, and teal on a deload. The heavier the day, the higher and brighter it climbs. Tapping another day or
 week moves it; History and Settings take today's day, and PRs keeps its plain navy. Behind the day's weight and bar, a graph shows that lift's top weight on each of its days in the block, in
 the same colours: solid up to the day on screen, which glows, and dotted after it, ending on the block's last
-weight. On a re-max day it sits behind the bar under the attempts.
+weight. On a re-max day it sits behind the bar under the attempts. Logging a set sends a short pulse up the glow.
 
 Each day's warm-up is a list to tick off: the empty bar, then the steps up to the working weight (or the re-max
 opener, or the taper week's heavy single), each with its plates a side. The first tick on the day being trained
@@ -41,7 +41,7 @@ time from Start to End workout, new accessory bests, and each day's top set mark
 or with reps past or short of the plan. Grinds get a note with next week's heavy weights for that lift, and the
 test weeks (3 and 6) say what the test sets did to the maxes. The card stays on top of the next week until
 anything in it is done, or **Hide** is tapped; it's also there whenever the finished week is picked. **Sets per
-muscle** opens that week in History → Muscles. Week 8 gets the block review instead.
+muscle** opens that week in History → Muscles. Week 8 gets the block review instead. The card takes its week's heaviest colour, cool for week 1 and hot by week 6.
 
 ## The 8-week block
 
@@ -235,7 +235,8 @@ later block starts from, since that's the review's number.
 When a re-max attempt beats every record, the screen goes dark the moment you mark it a good lift. Three
 white lights come on, that lift's bar drops in loaded to the old record with the old number hollow over it,
 the collars come off, the plates that change fly off and the new ones fly on, the number turns to steel and
-reads the new record, and the collars lock with a flash and a cloud of chalk. The gain shows under the bar.
+reads the new record, and the collars lock with a flash and a cloud of chalk. The re-max day's gold glows under it
+all and flares up the screen as the collars lock. The gain shows under the bar.
 Tap anywhere to get back to your day. Only a single on a re-max day can set it off, never a "2+" set.
 
 ## History
@@ -260,6 +261,8 @@ Tap anywhere to get back to your day. Only a single on a re-max day can set it o
 
 - the max each week trained from, with orange dots for test-set estimates and re-max singles;
 - weekly volume (weight × reps).
+
+Both are drawn in each week's colour for that lift, the same heat colours as the graph behind the day's weight.
 
 Tap or drag across a chart for a week's numbers; the same numbers are in "week by week" below it.
 Below the max chart, every max the lift has had is listed with the day it was set: maxes from before

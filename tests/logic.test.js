@@ -5,7 +5,7 @@ import {
   warmups, REMAX_RAMP, estimateMax, adjustMax, weekMax, attemptWeight, setWeight, singleWeight, restSeconds, newBlock,
   setFinish, finishFor, sessionStatus, weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak,
   restartBlock, evaluateLift, liftHistory, maxChanges, liftRecord, totalHistory, convertState, isValidState, upgrade, emptyState,
-  dayPct, heatOf, liftPath,
+  dayPct, heatOf, liftPath, weekHeat,
 } from '../logic.js';
 
 const MAX = { squat: 405, bench: 285, deadlift: 495 };
@@ -56,6 +56,10 @@ test('a day\'s heat runs from the deload\'s 60% to the third re-max attempt', ()
   assert.equal(heatOf(1.02), 1);
   assert.equal(heatOf(0.81), 0.5);
   assert.equal(heatOf(0.5), 0);
+  assert.equal(weekHeat(b, 5), 0.774); // week 6's 92.5% heavy days
+  assert.equal(weekHeat(b, 5, 'deadlift'), heatOf(0.85)); // deadlift has only the template day
+  assert.equal(weekHeat(b, 7), 1);
+  assert.equal(weekHeat(deload, 7), 0);
 });
 
 test('a lift\'s path through the block is each of its days\' top weight', () => {

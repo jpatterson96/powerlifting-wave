@@ -241,6 +241,12 @@ export function heatOf(pct) {
   return tidy(Math.min(1, Math.max(0, (pct - DELOAD.pct) / (top - DELOAD.pct))));
 }
 
+// How heavy a week gets, as heat: its hardest day, or one lift's hardest day in it.
+export function weekHeat(block, week, liftId = null) {
+  const days = block.log[week].filter((s) => !liftId || s.lift === liftId);
+  return Math.max(0, ...days.map((s) => heatOf(dayPct(s, week))));
+}
+
 // One lift's days through a block, in order, for the graph behind the day's weight: each day's top weight (as
 // planned or entered) and its planned share of the max. A re-max day counts its best good attempt once one is made,
 // else the third.

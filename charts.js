@@ -49,7 +49,8 @@ function overlay(f, n) {
 }
 
 // Step line of the max each block trained from, dots for tested results, the latest max labelled at the end.
-export function maxChart(weeks, width, height = 190) {
+// `colours`, one per week, draws the line in each week's colour instead of the one series colour.
+export function maxChart(weeks, width, height = 190, colours = null) {
   const f = frame(weeks, width, height);
   const values = weeks.flatMap((w) => [w.max, ...w.tests.map((t) => t.value)]);
   const lo = Math.min(...values);
@@ -69,11 +70,15 @@ export function maxChart(weeks, width, height = 190) {
   });
   const dots = weeks.flatMap((w, i) => w.tests.map((t) => `<circle class="chart-dot" cx="${f.x(i)}" cy="${y(t.value)}" r="4.5"/>`)).join('');
   const last = weeks[weeks.length - 1].max;
+  const heat = colours ? `<defs><linearGradient id="chart-heat-max" gradientUnits="userSpaceOnUse" x1="${PAD.left}" x2="${width - PAD.right}" y1="0" y2="0">
+      ${colours.map((c, i) => `<stop offset="${((i + 0.5) / colours.length).toFixed(4)}" stop-color="${c}"/>`).join('')}
+    </linearGradient></defs>` : '';
   return `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true">
+    ${heat}
     ${yAxis(ticks, y, f, num)}
     <line class="chart-axis" x1="${PAD.left}" x2="${width - PAD.right}" y1="${f.bottom}" y2="${f.bottom}"/>
     ${blockAxis(weeks, f)}
-    <path class="chart-line" d="${path}"/>
+    <path class="chart-line" d="${path}"${colours ? ' style="stroke:url(#chart-heat-max)"' : ''}/>
     ${dots}
     <text class="chart-end" x="${width - PAD.right + 6}" y="${y(last) + 5}">${num(last)}</text>
     ${overlay(f, weeks.length)}
@@ -137,7 +142,8 @@ export function sparkline(steps, from, to, width = 96, height = 34) {
 }
 
 // One column per week of everything lifted on that lift (weight × reps); empty weeks draw nothing.
-export function volumeChart(weeks, width, height = 160) {
+// `colours`, one per week, fills each week's bar in its own colour.
+export function volumeChart(weeks, width, height = 160, colours = null) {
   const f = frame(weeks, width, height);
   const top = Math.max(...weeks.map((w) => w.volume));
   const step = niceStep(top, 3);
@@ -153,7 +159,7 @@ export function volumeChart(weeks, width, height = 160) {
     const y0 = y(w.volume);
     const rr = Math.min(r, f.bottom - y0);
     // Rounded at the data end, square at the baseline.
-    return `<path class="chart-bar" d="M${x0},${f.bottom}V${y0 + rr}Q${x0},${y0} ${x0 + rr},${y0}H${x0 + bar - rr}Q${x0 + bar},${y0} ${x0 + bar},${y0 + rr}V${f.bottom}Z"/>`;
+    return `<path class="chart-bar" d="M${x0},${f.bottom}V${y0 + rr}Q${x0},${y0} ${x0 + rr},${y0}H${x0 + bar - rr}Q${x0 + bar},${y0} ${x0 + bar},${y0 + rr}V${f.bottom}Z"${colours ? ` style="fill:${colours[i]}"` : ''}/>`;
   }).join('');
   return `<svg class="chart-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true">
     ${yAxis(ticks, y, f, compact)}

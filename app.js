@@ -4,7 +4,7 @@ import {
   singleWeight, restSeconds, platesPerSide, warmups, emptyState, newBlock, finishFor, setFinish, sessionStatus,
   weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, longBreak, restartBlock, evaluateLift, liftHistory,
   maxChanges, liftRecord, convertState, upgrade, PLATES, plateSizes, dueSession, missedSessions, FEELS, GRINDS, heavyFeel,
-  touched, testResult, dayPct, heatOf, liftPath,
+  touched, testResult, dayPct, heatOf, liftPath, weekHeat,
 } from './logic.js';
 import {
   WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, SMALL_PLATES, isCounted, countedPlates, weightOf, loadOf, PLATES_UP_TO, GUESSED_STEP, looksCounted, countInPlates, isLightWeek, plannedSets, newExercise,
@@ -26,7 +26,7 @@ import {
 
 const KEY = 'powerlifting-wave';
 // The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
-const VERSION = 'wave-v24';
+const VERSION = 'wave-v25';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -281,6 +281,17 @@ function heatColour(t) {
 }
 
 const oklch = ([l, c, h]) => `oklch(${l.toFixed(3)} ${c.toFixed(3)} ${(h % 360).toFixed(1)})`;
+// The whole scale, light to heavy, for a legend's key.
+const heatScale = () => `linear-gradient(90deg, ${[0, 0.25, 0.5, 0.75, 1].map((t) => oklch(heatColour(t))).join(', ')})`;
+
+// A short pulse up the glow when a set is logged: it swells and a band of its light rises and fades.
+function pulseGlow() {
+  const root = document.documentElement;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  root.classList.remove('is-pulse');
+  void root.offsetWidth;
+  root.classList.add('is-pulse');
+}
 
 // The day the colour follows: the one open on Train, else the one due today. The PRs show keeps its own stage.
 function paintHeat() {
@@ -650,7 +661,7 @@ function weekCard(b) {
       <span class="recap-lift">${LIFTS.find((l) => l.id === d.lift).short}</span>
       ${dayChip(d)}
     </li>`).join('');
-  return `<section class="recap" aria-label="Week ${week + 1} summary" data-key="recap">
+  return `<section class="recap" style="--card:${oklch(heatColour(weekHeat(b, week)))}" aria-label="Week ${week + 1} summary" data-key="recap">
     <div class="recap-head">
       <h2 class="recap-title">Week ${week + 1} done</h2>
       ${hide ? `<button class="btn-quiet recap-hide" data-action="week-hide" data-week="${week}">Hide</button>` : ''}
@@ -1466,6 +1477,7 @@ function openMoment(lift, old, value) {
   const sleeve = Math.max(100, stackWidth(plan.plates) + 18, stackWidth([...plan.keep, ...plan.off]) + 18);
   const bar = showBar(plan, lift.id, 'pr', sleeve, true);
   moment.firstElementChild.innerHTML = `
+    <i class="moment-flare" style="--d:${plan.lock}ms"></i>
     <div class="moment-lights" style="--lock:${plan.lock}ms">${plan.lightsAt.map((d) => `<i class="moment-light" style="--d:${d}ms"></i>`).join('')}</div>
     <div class="moment-lift">
       <p class="show-num moment-num" style="--d:${plan.landed - 140}ms"><span class="show-digits">${big(old)}</span></p>
@@ -2290,6 +2302,8 @@ function liftsHistory() {
   chartData.max = weeks;
   chartData.volume = weeks;
   const width = chartWidth();
+  // Each week in that lift's heat colour, the same as the graph behind the day's weight on Train.
+  const heat = weeks.map((w) => oklch(heatColour(weekHeat(state.blocks[w.block], w.week, lift.id))));
   const tested = weeks.filter((w) => w.tests.length);
   const lifted = weeks.filter((w) => w.volume > 0);
   const latest = weeks[weeks.length - 1].max;
@@ -2330,10 +2344,10 @@ function liftsHistory() {
   return `<fieldset class="lift-pick" aria-label="Lift">${segmented('lift', LIFTS.map((l) => ({ value: l.id, label: l.short })), lift.id)}</fieldset>
     <section class="chart-block">
       <h2 class="chart-title">${lift.short} max</h2>
-      <p class="chart-legend"><span><i class="key-line"></i>Max you trained from</span><span><i class="key-dot"></i>Tested</span></p>
+      <p class="chart-legend"><span><i class="key-line" style="background:${heatScale()}"></i>Max you trained from</span><span><i class="key-dot"></i>Tested</span></p>
       <figure class="chart" data-chart="max" data-key="chart-max" tabindex="0"
           aria-label="${lift.short} max by week, now ${fmt(latest)} ${state.unit}${tested.length ? `, ${plural(tested.length, 'tested result')}` : ''}. Use the arrow keys to read each week.">
-        ${maxChart(weeks, width)}
+        ${maxChart(weeks, width, undefined, heat)}
         <div class="chart-tip" hidden></div>
       </figure>
       <p class="hint">${tested.length ? 'Dots are estimates from your test sets (the 2+ sets) and re-max singles. Tap a week for its numbers.' : 'Dots appear here after your week 3 test sets: the max each one estimates.'}</p>
@@ -2351,7 +2365,7 @@ function liftsHistory() {
       <p class="chart-legend">Weight × reps for every ${name} set you logged, in ${state.unit}.</p>
       ${lifted.length ? `<figure class="chart" data-chart="volume" data-key="chart-volume" tabindex="0"
           aria-label="Weekly ${name} volume, ${plural(lifted.length, 'week')} logged. Use the arrow keys to read each week.">
-        ${volumeChart(weeks, width)}
+        ${volumeChart(weeks, width, undefined, heat)}
         <div class="chart-tip" hidden></div>
       </figure>` : `<p class="chart-empty">Log a ${name} set to see your weekly volume.</p>`}
     </section>
@@ -2700,6 +2714,7 @@ function logSet(session, set, reps) {
   }
   save();
   if (!fresh) return;
+  pulseGlow();
   const next = session.reps.findIndex((r) => r === null);
   if (next === -1) rest.stop();
   else rest.start(restSeconds(session, ui.week, next), nextLabel(session, next));
@@ -2889,6 +2904,7 @@ function logExtra(index, exercise, set, value) {
   if (value) markTrained(session);
   save();
   if (!fresh) return;
+  pulseGlow();
   const group = dayGroups(state, session).find((g) => g.includes(exercise)) ?? [exercise];
   const next = groupNext(session, index, group);
   if (!next) return rest.stop();

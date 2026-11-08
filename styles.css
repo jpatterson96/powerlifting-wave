@@ -97,7 +97,29 @@ body {
       oklch(var(--heat-l) var(--heat-c) var(--heat-h) / calc(0.2 + 0.26 * var(--heat-t))),
       oklch(var(--heat-l) var(--heat-c) var(--heat-h) / calc(0.07 + 0.08 * var(--heat-t))) 55%,
       transparent 100%);
+    transform-origin: 50% 100%;
     pointer-events: none;
+  }
+
+  /* A logged set (app.js pulseGlow): the glow swells and brightens, and a band of its light rises from the floor
+     and fades. */
+  :root.is-heat body::after {
+    content: "";
+    position: fixed;
+    inset: auto 0 0;
+    z-index: -1;
+    height: 42%;
+    background: radial-gradient(110% 46% at 50% 100%, oklch(var(--heat-l) var(--heat-c) var(--heat-h) / 0.8), transparent 75%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  :root.is-heat.is-pulse body::before {
+    animation: heat-pulse 900ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+
+  :root.is-heat.is-pulse body::after {
+    animation: heat-rise 1000ms ease-out;
   }
 
   /* See-through enough for the glow to show under the tabs. */
@@ -106,9 +128,26 @@ body {
   }
 }
 
+@keyframes heat-pulse {
+  0% { transform: scaleY(1); filter: brightness(1); }
+  22% { transform: scaleY(1.25); filter: brightness(1.6); }
+  100% { transform: scaleY(1); filter: brightness(1); }
+}
+
+@keyframes heat-rise {
+  0% { opacity: 0; transform: translateY(0); }
+  12% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-120%); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root.is-heat {
     transition: none;
+  }
+
+  :root.is-heat.is-pulse body::before,
+  :root.is-heat.is-pulse body::after {
+    animation: none;
   }
 }
 
@@ -1495,12 +1534,18 @@ legend.setting-title + * {
 }
 
 /* A finished week's card at the top of Train: its numbers, each day's top set, and what to keep an eye on. */
+/* The card takes its week's heaviest colour (app.js weekCard sets --card): the border, a wash from the top and a
+   soft glow. */
 .recap {
   margin-top: 18px;
   padding: 18px 16px 16px;
-  border: 1.5px solid var(--chalk);
+  border: 1.5px solid var(--card, var(--chalk));
   border-radius: 16px;
   background: linear-gradient(180deg, var(--surface), var(--bg) 70%);
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--card, transparent) 22%, transparent), transparent 62%),
+    linear-gradient(180deg, var(--surface), var(--bg) 70%);
+  box-shadow: 0 0 30px color-mix(in oklab, var(--card, transparent) 20%, transparent);
 }
 
 .recap-head {
@@ -3701,8 +3746,46 @@ main.is-show {
   }
 }
 
+/* The re-max day's gold glows under the moment from the start and flares up the screen as the collars lock, then
+   settles. The gold is the top of the block's heat (app.js HEAT). */
+.moment-flare {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(130% 66% at 50% 100%, oklch(0.82 0.16 68 / 0.42), oklch(0.82 0.16 68 / 0.13) 55%, transparent 100%);
+  pointer-events: none;
+  animation: flare-in 700ms ease-out both;
+}
+
+.moment-flare::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(150% 115% at 50% 100%, oklch(0.96 0.07 85 / 0.8), oklch(0.84 0.16 68 / 0.4) 45%, transparent 85%);
+  transform-origin: 50% 100%;
+  opacity: 0;
+  animation: flare-surge 2000ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: var(--d);
+}
+
+@keyframes flare-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes flare-surge {
+  0% { opacity: 0; transform: scaleY(0.5); }
+  16% { opacity: 1; transform: scaleY(1.06); }
+  100% { opacity: 0; transform: scaleY(1); }
+}
+
 /* With motion turned down the moment is drawn finished: lights on, the new plates on, the old ones gone. */
 @media (prefers-reduced-motion: reduce) {
+  .moment-flare,
+  .moment-flare::after {
+    animation: none;
+  }
+
   .moment-light {
     border-color: var(--chalk);
     background: var(--chalk);

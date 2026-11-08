@@ -313,6 +313,8 @@ It needs an access key that can only touch that one repository:
 6. In the app: **Settings → Save to GitHub**, paste the key, **Connect**.
 
 The key is stored only on the phone. If the phone is lost, delete the key on that same GitHub page.
+The page only runs its own files and only connects to `api.github.com` (the Content-Security-Policy in
+`index.html`), so the key can't be sent anywhere else, even by a bug.
 
 GitHub doesn't let a web page see when a key expires, so enter the day under **Access key expires on**
 (also offered when connecting). From two weeks before, Train shows a reminder. Make a new key the same way and

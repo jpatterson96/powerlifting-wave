@@ -26,7 +26,7 @@ import {
 
 const KEY = 'powerlifting-wave';
 // The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
-const VERSION = 'wave-v28';
+const VERSION = 'wave-v29';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -845,15 +845,15 @@ function sessionBody(b, session, i) {
   return `<div class="session-body">
     <p class="lift-scheme">${p.sets} × ${p.reps} at ${tidy(p.pct * 100)}% of ${fmt(work)}${state.trainingMax ? ' (training max)' : ''}. Rest ${restText(restSeconds(session, ui.week, 1))} between sets.</p>
     ${movedNote}
-    <div class="lift-stage">
-      ${liftGraph(b, session, i)}
+    <div class="lift-top">
       <button class="lift-weight" data-action="weight" data-index="${i}" data-key="weight-${i}"
           aria-label="${lift.name}, ${fmt(shown)} ${state.unit}. Change weight">
         <span class="lift-num">${fmt(shown)}</span><span class="lift-unit">${state.unit}</span>
       </button>
-      ${session.weight !== null && session.weight !== target ? `<p class="lift-target">Target is ${fmt(target)}</p>` : ''}
-      ${barbell(shown)}
+      ${liftGraph(b, session, i)}
     </div>
+    ${session.weight !== null && session.weight !== target ? `<p class="lift-target">Target is ${fmt(target)}</p>` : ''}
+    ${barbell(shown)}
     ${warmupList(session, i, ramp, single ? `The last is one heavy single at ${tidy(p.single * 100)}%. Rest ${SINGLE_REST / 60} minutes after it, before your sets.` : '')}
     ${isHeavyDay(session) ? '<p class="hint">Heavy day: stop each set with 2–4 reps left in the tank.</p>' : ''}
     <div class="sets" role="group" aria-label="${lift.name} sets">
@@ -1260,7 +1260,7 @@ function remaxBody(b, session, i) {
     <p class="lift-scheme">Attempts are built from ${fmt(base)}, ${fromTest ? 'the estimate from your week 6 test set' : 'your max'}. Rest ${restText(restSeconds(session, ui.week, 1))} before each attempt.</p>
     ${warmupList(session, i, ramp, 'Rest 2–3 minutes between warm-ups.')}
     <ol class="attempts">${attempts}</ol>
-    ${loading !== null ? `<div class="lift-stage">${liftGraph(b, session, i, GRAPH_BAR_H)}${barbell(weights[loading], ATTEMPT_NAMES[loading])}</div>` : ''}
+    ${loading !== null ? barbell(weights[loading], ATTEMPT_NAMES[loading], liftGraph(b, session, i, GRAPH_BAR_H)) : ''}
     <p class="hint">Pick the third from how the second moved: fast, go for ${fmt(weights[2])}; slow, take about ${fmt(slow)}; a grind, stop there and mark the third a pass.</p>
     ${best !== null ? `<p class="remax-best">Best good lift <strong>${fmt(best)}</strong> ${state.unit}</p>` : ''}
     ${dayEnd(session, i)}
@@ -1268,11 +1268,12 @@ function remaxBody(b, session, i) {
   </div>`;
 }
 
-// The day's lift across the block, behind its weight and bar: each of its days' top weight, coloured by how hard
-// the day is, solid up to the day on screen and dotted after it, with the block's last weight at the end. A re-max
-// day has no big number, so its graph is shorter and sits behind just the bar.
-const GRAPH_H = 210;
-const GRAPH_BAR_H = 104;
+// The day's lift across the block, beside its weight: each of its days' top weight, coloured by how hard the day
+// is, solid up to the day on screen and dotted after it, with the block's last weight at the end. A re-max day has
+// no big number, so its graph is shorter and sits beside the bar.
+const GRAPH_H = 84;
+const GRAPH_BAR_H = 58;
+const GRAPH_END = 34; // room right of the last day for its weight
 
 function smoothPath(points) {
   const at = (i) => points[Math.max(0, Math.min(points.length - 1, i))];
@@ -1290,43 +1291,46 @@ function liftGraph(b, session, i, H = GRAPH_H) {
   const days = liftPath(b, session.lift, state);
   const at = days.findIndex((d) => d.week === ui.week && d.index === i);
   if (days.length < 2 || at === -1) return '';
-  const W = Math.min(window.innerWidth, 560);
+  // About the room left beside the number. The drawing stretches to the real room, so the dot and the last weight
+  // are laid over it in HTML, where they stay round and upright.
+  const W = Math.round(Math.min(window.innerWidth, 560) / 2 - 20);
+  const labelled = at < days.length - 1;
+  const left = 6;
+  const right = labelled ? GRAPH_END : 6;
   const weights = days.map((d) => d.weight);
-  const lo = Math.min(...weights) * 0.97;
-  const hi = Math.max(...weights) * 1.012;
-  const x = (k) => 24 + (k / (days.length - 1)) * (W - 48);
-  const y = (w) => H - 14 - ((w - lo) / (hi - lo || 1)) * (H - 40);
+  const lo = Math.min(...weights);
+  const hi = Math.max(...weights);
+  const x = (k) => left + (k / (days.length - 1)) * (W - left - right);
+  const y = (w) => H - 8 - ((w - lo) / (hi - lo || 1)) * (H - 16);
   const points = days.map((d, k) => [x(k), y(d.weight)]);
   const line = smoothPath(points);
   const [tx, ty] = points[at].map((v) => v.toFixed(1));
   const now = oklch(heatColour(heatOf(days[at].pct)));
   const stops = days.map((d, k) => `<stop offset="${(k / (days.length - 1)).toFixed(4)}" stop-color="${oklch(heatColour(heatOf(d.pct)))}"/>`).join('');
   const end = points.at(-1);
-  const last = at === days.length - 1 ? ''
-    : `<text x="${(end[0] - 10).toFixed(1)}" y="${(end[1] + 4).toFixed(1)}" text-anchor="end">${fmt(weights.at(-1))}</text>`;
-  return `<svg class="lift-graph" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px" aria-hidden="true">
+  const at100 = (px) => `${((px / W) * 100).toFixed(2)}%`;
+  const last = labelled
+    ? `<span class="lift-graph-end" style="left:calc(${at100(end[0])} + 8px);top:${end[1].toFixed(1)}px">${fmt(weights.at(-1))}</span>` : '';
+  return `<div class="lift-graph" style="height:${H}px" aria-hidden="true">
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
     <defs>
-      <linearGradient id="lift-graph-line" gradientUnits="userSpaceOnUse" x1="24" y1="0" x2="${W - 24}" y2="0">${stops}</linearGradient>
+      <linearGradient id="lift-graph-line" gradientUnits="userSpaceOnUse" x1="${left}" y1="0" x2="${W - right}" y2="0">${stops}</linearGradient>
       <linearGradient id="lift-graph-fill" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stop-color="${now}" stop-opacity="0.22"/><stop offset="0.9" stop-color="${now}" stop-opacity="0"/>
       </linearGradient>
-      <radialGradient id="lift-graph-halo">
-        <stop offset="0" stop-color="${now}" stop-opacity="0.6"/><stop offset="1" stop-color="${now}" stop-opacity="0"/>
-      </radialGradient>
       <clipPath id="lift-graph-done"><rect width="${tx}" height="${H}"/></clipPath>
       <clipPath id="lift-graph-next"><rect x="${tx}" width="${W}" height="${H}"/></clipPath>
     </defs>
     <path d="${line} L${end[0].toFixed(1)} ${H} L${points[0][0].toFixed(1)} ${H} Z" fill="url(#lift-graph-fill)" clip-path="url(#lift-graph-done)"/>
     <path class="lift-graph-next" d="${line}" stroke="url(#lift-graph-line)" clip-path="url(#lift-graph-next)"/>
     <path class="lift-graph-done" d="${line}" stroke="url(#lift-graph-line)" clip-path="url(#lift-graph-done)"/>
+    </svg>
+    <span class="lift-graph-dot" style="left:${at100(tx)};top:${ty}px;--dot:${now}"></span>
     ${last}
-    <line class="lift-graph-stem" x1="${tx}" y1="${ty}" x2="${tx}" y2="${H}" stroke="${now}"/>
-    <circle cx="${tx}" cy="${ty}" r="26" fill="url(#lift-graph-halo)"/>
-    <circle cx="${tx}" cy="${ty}" r="5" fill="${now}"/>
-  </svg>`;
+  </div>`;
 }
 
-function barbell(total, attempt) {
+function barbell(total, attempt, beside = '') {
   const plates = platesPerSide(total, state.unit, BAR[state.unit], plateSizes(state));
   const loaded = tidy(BAR[state.unit] + 2 * plates.reduce((sum, p) => sum + p, 0));
   let caption = plates.length ? `${attempt ? `${attempt}, each side` : 'Each side'}: ${plates.map(fmt).join(' + ')}` : 'Empty bar';
@@ -1336,8 +1340,9 @@ function barbell(total, attempt) {
     const [colour, h, w] = PLATE_STYLE[state.unit][p];
     return `<span class="plate plate-${colour}" style="height:${h}px;width:${w}px"></span>`;
   }).join('');
+  const bar = `<div class="bar" aria-hidden="true"><span class="collar"></span>${shapes}</div>`;
   return `<figure class="barbell">
-    <div class="bar" aria-hidden="true"><span class="collar"></span>${shapes}</div>
+    ${beside ? `<div class="bar-row">${bar}${beside}</div>` : bar}
     <figcaption class="bar-caption">${caption}</figcaption>
   </figure>`;
 }

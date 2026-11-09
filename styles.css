@@ -908,32 +908,42 @@ legend.setting-title + * {
   margin-top: 14px;
 }
 
-/* The lift's block behind its weight and bar (app.js liftGraph, which sets its height): edge to edge, from above
-   the number down to the bar. */
-.lift-stage {
-  position: relative;
-  isolation: isolate;
+/* The lift's block in the room right of its weight, or of the bar on a re-max day (app.js liftGraph, which sets its
+   height). The drawing stretches to that room; the day's dot and the last weight sit on top at their own size. */
+.lift-top,
+.bar-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+}
+
+.lift-top {
+  align-items: end;
+}
+
+.lift-top .lift-graph {
+  margin-bottom: 10px;
+}
+
+.bar-row {
+  align-items: center;
+  gap: 10px;
 }
 
 .lift-graph {
-  position: absolute;
-  right: -20px;
-  bottom: 22px;
-  left: -20px;
-  z-index: -1;
-  width: calc(100% + 40px);
-  overflow: visible;
+  position: relative;
   pointer-events: none;
 }
 
-.lift-graph text {
-  font: 700 13px var(--display);
-  fill: var(--muted);
+.lift-graph svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
 
 .lift-graph-done,
-.lift-graph-next,
-.lift-graph-stem {
+.lift-graph-next {
   fill: none;
   vector-effect: non-scaling-stroke;
 }
@@ -946,12 +956,34 @@ legend.setting-title + * {
 .lift-graph-next {
   stroke-width: 1.5;
   stroke-dasharray: 3 5;
-  opacity: 0.4;
+  opacity: 0.55;
 }
 
-.lift-graph-stem {
-  stroke-width: 1;
-  opacity: 0.45;
+.lift-graph-dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: var(--dot);
+}
+
+.lift-graph-dot::before {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--dot), transparent);
+  opacity: 0.6;
+}
+
+.lift-graph-end {
+  position: absolute;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font: 700 13px/1 var(--display);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .bar {

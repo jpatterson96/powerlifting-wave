@@ -27,9 +27,9 @@ counts each lift's heavy days by how they felt.
 The background follows how heavy the day on screen is, from its top set's share of the max: a glow rises from the
 bottom of the screen, blue on a 70% day, then violet and magenta, ember by week 6's 92.5% singles and gold on
 re-max day, and teal on a deload. The heavier the day, the higher and brighter it climbs. Tapping another day or
-week moves it; History and Settings take today's day, and PRs keeps its plain navy. Behind the day's weight and bar, a graph shows that lift's top weight on each of its days in the block, in
+week moves it; History and Settings take today's day, and PRs keeps its plain navy. Beside the day's weight, a small graph shows that lift's top weight on each of its days in the block, in
 the same colours: solid up to the day on screen, which glows, and dotted after it, ending on the block's last
-weight. On a re-max day it sits behind the bar under the attempts. Logging a set sends a short pulse up the glow.
+weight. On a re-max day it sits beside the bar under the attempts. Logging a set sends a short pulse up the glow.
 
 Each day's warm-up is a list to tick off: the empty bar, then the steps up to the working weight (or the re-max
 opener, or the taper week's heavy single), each with its plates a side. The first tick on the day being trained
@@ -262,7 +262,7 @@ Tap anywhere to get back to your day. Only a single on a re-max day can set it o
 - the max each week trained from, with orange dots for test-set estimates and re-max singles;
 - weekly volume (weight × reps).
 
-Both are drawn in each week's colour for that lift, the same heat colours as the graph behind the day's weight.
+Both are drawn in each week's colour for that lift, the same heat colours as the graph beside the day's weight.
 
 Tap or drag across a chart for a week's numbers; the same numbers are in "week by week" below it.
 Below the max chart, every max the lift has had is listed with the day it was set: maxes from before

@@ -8,7 +8,7 @@ import {
 } from './logic.js';
 import {
   WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, SMALL_PLATES, isCounted, countedPlates, weightOf, loadOf, PLATES_UP_TO, GUESSED_STEP, looksCounted, countInPlates, isLightWeek, plannedSets, newExercise,
-  dayExtras, dayGroups, exercisesByDay, moveExercise, setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, earlierTimes, isNewBest, defaultVariant,
+  dayExtras, dayGroups, exercisesByDay, moveExercise, learnOrder, setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, earlierTimes, isNewBest, defaultVariant,
   suggestion, sessionBest, records, muscleSets, workoutTime, timedSessions, partTimes, logBodyweight, cleanExtras,
   DAY_KINDS, muscleOutlook, skipConcern, dropOffers,
 } from './extras.js';
@@ -26,7 +26,7 @@ import {
 
 const KEY = 'powerlifting-wave';
 // The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
-const VERSION = 'wave-v29';
+const VERSION = 'wave-v30';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -2564,7 +2564,7 @@ function exercisesSection() {
   }).join('');
   return `<section class="setting">
     <h2 class="setting-title">Accessories</h2>
-    <p class="hint">Your exercises by the days they show up on. Tap a day to see its exercises with their rep ranges, in the order you do them, then tap one to edit it; the arrows move one within its days.</p>
+    <p class="hint">Your exercises by the days they show up on, in the order you last did them: finishing a day's accessories keeps that order for next time. Tap a day to see its exercises with their rep ranges, then tap one to edit it; the arrows move one within its days.</p>
     <div class="index-groups">${groups}</div>
     <button class="btn" data-action="exercise-new">Add an exercise</button>
     <p class="hint credit">Exercise drawings from <a href="https://github.com/AlexMollard/Open-Exercise-Art" target="_blank" rel="noopener">Open Exercise Art</a> by Alex Mollard, <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>, with their lines thickened.</p>
@@ -2938,9 +2938,23 @@ function markTrained(session) {
   block().lastTrained = today;
   for (const s of block().log.flat()) {
     if (s === session || !s.date || s.date >= today) continue;
-    finishExtras(state, s);
+    // A day closed this way settles here, so the order it was done in is kept too, quietly: it's another day's.
+    if (finishExtras(state, s)) learnOrder(state, s);
     if (s.started && !s.ended) s.ended = workoutTime(s).end;
   }
+}
+
+// A day whose accessories are each done or skipped.
+const settled = (session) => !unfinished(session).length;
+
+// Once an action leaves the day's accessories all done or skipped (`before` says whether they were already), the
+// list keeps the order they were done in for that kind of day (extras.js learnOrder). What to tell the lifter when
+// that changed the order, else ''.
+function keepOrder(session, before) {
+  if (before || !settled(session) || !learnOrder(state, session)) return '';
+  const kind = DAY_KINDS.find((k) => k.days.includes(session.day));
+  const when = session.date === todayISO() ? 'today' : `on ${session.day}`;
+  return `${kindName(kind)} now list${kind.days.length > 1 ? '' : 's'} your accessories in the order you did them ${when}.`;
 }
 
 // Starting a day ahead of today's one (a tap while looking at a later week, say) asks first. Today's day, one
@@ -2959,8 +2973,11 @@ function okToStart(index) {
   });
 }
 
+// Logs an accessory set (null clears it). Returns what to tell the lifter when the set settled the day and the
+// order it was done in became the list's (keepOrder), else ''.
 function logExtra(index, exercise, set, value) {
   const session = sessionAt(index);
+  const before = settled(session);
   const variant = entryOf(session, exercise.id)?.variant ?? defaultVariant(state, exercise);
   const entry = entryFor(session, exercise, variant);
   const was = entry.sets[set];
@@ -2972,15 +2989,20 @@ function logExtra(index, exercise, set, value) {
   // Clearing an added set at the end removes it again.
   if (value === null && set >= plannedSets(exercise, ui.week) && set === entry.sets.length - 1) entry.sets.pop();
   if (value) markTrained(session);
+  const kept = keepOrder(session, before);
   save();
-  if (!fresh) return;
+  if (!fresh) return kept;
   pulseGlow();
   const group = dayGroups(state, session).find((g) => g.includes(exercise)) ?? [exercise];
   const next = groupNext(session, index, group);
-  if (!next) return rest.stop();
+  if (!next) {
+    rest.stop();
+    return kept;
+  }
   // Within a superset round there's only the move to the other exercise; the full rest comes after the round.
   const seconds = next.exercise !== exercise && next.set === set ? 15 : Math.max(...group.map((e) => e.rest));
   rest.start(seconds, extraNextLabel(next));
+  return kept;
 }
 
 // A group's next set to do, with the weight it's prefilled with, or null once every set is done or skipped. In a
@@ -3509,10 +3531,11 @@ const ACTIONS = {
       guessPlates(true);
       const switched = !isCounted(e) && ui.pad.plates;
       if (switched) countInPlates(e);
-      logExtra(ui.sheet.index, e, ui.sheet.set, { weight, reps: Number(el.dataset.reps) });
+      const kept = logExtra(ui.sheet.index, e, ui.sheet.set, { weight, reps: Number(el.dataset.reps) });
       repsSheet.close();
       render();
-      if (switched) toast(`${e.name} is now counted in plates a side: ${fmt(weight)} is ${platesText(weight)}.`);
+      const news = [switched ? `${e.name} is now counted in plates a side: ${fmt(weight)} is ${platesText(weight)}.` : '', kept];
+      if (switched || kept) toast(news.filter(Boolean).join(' '));
       return;
     }
     const session = sessionAt(ui.sheet.index);
@@ -3587,8 +3610,9 @@ const ACTIONS = {
     const { entry, plan } = extraPlan(sessionAt(index), index, e);
     const target = extraTarget(e, entry, plan, set);
     if (!entry?.sets[set] && target.weight !== null) {
-      logExtra(index, e, set, { weight: target.weight, reps: target.reps });
+      const kept = logExtra(index, e, set, { weight: target.weight, reps: target.reps });
       render();
+      if (kept) toast(kept);
     } else {
       openExtra(index, e.id, set);
     }
@@ -3604,6 +3628,7 @@ const ACTIONS = {
   // Takes off the last set not done yet; when every set is logged, the last one, after asking.
   async 'extra-set-remove'(el) {
     const session = sessionAt(Number(el.dataset.index));
+    const before = settled(session);
     const e = exerciseById(el.dataset.exercise);
     const entry = entryFor(session, e, entryOf(session, e.id)?.variant ?? defaultVariant(state, e));
     const open = entry.sets.lastIndexOf(null);
@@ -3617,19 +3642,22 @@ const ACTIONS = {
       }))) return;
     }
     entry.sets.splice(open === -1 ? entry.sets.length - 1 : open, 1);
+    const kept = keepOrder(session, before);
     save();
     render();
+    if (kept) toast(kept);
   },
   'extra-finish'(el) {
     const i = Number(el.dataset.index);
     const left = unfinished(sessionAt(i));
     finishExtras(state, sessionAt(i));
+    const kept = keepOrder(sessionAt(i), !left.length);
     ui.extraOpen = null;
     save();
     rest.stop();
     render();
     const short = shortWeekText(i, left);
-    if (short) toast(`Skipped the rest.${short}`);
+    if (short || kept) toast(`Skipped the rest.${short}${kept ? ` ${kept}` : ''}`);
   },
   // Starting dates the day (and closes earlier ones) the same as logging a set does.
   async 'workout-start'(el) {
@@ -3646,11 +3674,12 @@ const ACTIONS = {
     const open = unfinished(session);
     session.ended = nowISO();
     const left = finishExtras(state, session);
+    const kept = keepOrder(session, !open.length);
     ui.extraOpen = null;
     save();
     rest.stop();
     render();
-    toast(`Workout ended, ${spanText(workoutTime(session).total)}.${left ? ` ${plural(left, 'accessory')} not finished ${left === 1 ? 'was' : 'were'} skipped.${shortWeekText(i, open)}` : ''}`);
+    toast(`Workout ended, ${spanText(workoutTime(session).total)}.${left ? ` ${plural(left, 'accessory')} not finished ${left === 1 ? 'was' : 'were'} skipped.${shortWeekText(i, open)}` : ''}${kept ? ` ${kept}` : ''}`);
   },
   // The workout pane: Train, on the day under way, at what's next (the accessory opened), or at End once it's all done.
   'workout-open'() {
@@ -3703,10 +3732,12 @@ const ACTIONS = {
     const session = sessionAt(i);
     const e = exerciseById(el.dataset.exercise);
     const concern = concernFor(session, i, e);
+    const before = settled(session);
     entryFor(session, e, defaultVariant(state, e)).skipped = true;
+    const kept = keepOrder(session, before);
     save();
     render();
-    if (concern) toast(`${e.name} skipped. ${concernText(concern)}`);
+    if (concern || kept) toast([concern ? `${e.name} skipped. ${concernText(concern)}` : '', kept].filter(Boolean).join(' '));
   },
   // From the day's summary: an exercise skipped time after time comes off this kind of day. Its log stays.
   'extra-drop'(el) {

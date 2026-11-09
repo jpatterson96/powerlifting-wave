@@ -125,6 +125,31 @@ export function dayGroups(state, session) {
   return groups;
 }
 
+// Remembers the order the lifter works in. Once a day's accessories are done or skipped, the ones done (a
+// superset as one) take the places in the day's list that done ones held, in the order each was started, so the
+// next day of that kind lists them that way. Anything skipped or left keeps its place, as a skip says nothing
+// about order. The list's places held by other days' exercises don't change. A day with a later one of its kind
+// already logged is old news and teaches nothing. True when the day's order changed.
+export function learnOrder(state, session) {
+  if (!session.date) return false;
+  const kind = DAY_KINDS.find((k) => k.days.includes(session.day));
+  const logged = (s) => s.extras?.some((x) => !x.skipped && x.sets.some(Boolean));
+  const newer = state.blocks.some((b) => b.log.flat().some((s) => s !== session && s.date > session.date && kind?.days.includes(s.day) && logged(s)));
+  if (!kind || newer) return false;
+  const groups = dayGroups(state, { day: session.day });
+  const started = (g) => g.flatMap((e) => entryOf(session, e.id)?.sets.filter(Boolean).map((s) => s.at) ?? []).filter(Boolean).sort()[0];
+  const done = groups.map((g, k) => ({ g, k, at: started(g) })).filter((x) => x.at);
+  const order = [...done].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.k - b.k));
+  if (order.every((x, n) => x === done[n])) return false;
+  const next = [...groups];
+  done.forEach((x, n) => { next[x.k] = order[n].g; });
+  const places = groups.flat().map((e) => state.exercises.indexOf(e)).sort((a, b) => a - b);
+  const list = [...state.exercises];
+  next.flat().forEach((e, n) => { list[places[n]] = e; });
+  state.exercises = list;
+  return true;
+}
+
 // Pairs two exercises as a superset, `first` done before `second`. An exercise is in one superset at most,
 // so any earlier pairing of either is undone. A null `second` just clears `first`'s pairing.
 export function setLink(state, first, second) {

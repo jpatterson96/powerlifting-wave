@@ -5,7 +5,7 @@ import {
   newExercise, dayExtras, dayGroups, setLink, supersetOrder, ensureEntry, entryOf, exerciseHistory, lastTime, earlierTimes,
   defaultVariant, suggestion, sessionBest, records, logBodyweight, cleanExtras, finishExtras, plannedSets, isNewBest, muscleSets,
   isCounted, countedPlates, weightOf, loadOf, looksCounted, countInPlates, workoutTime, timedSessions, partTimes, exercisesByDay, moveExercise,
-  muscleOutlook, skipConcern, skipStreak, dropOffers,
+  learnOrder, muscleOutlook, skipConcern, skipStreak, dropOffers,
 } from '../extras.js';
 
 const MAX = { squat: 385, bench: 315, deadlift: 455 };
@@ -451,6 +451,53 @@ test('settings split the exercises by kind of day, and a move steps over the nex
   assert.equal(exercisesByDay(state).length, 3);
   assert.equal(moveExercise(state, legs, -1), true);
   assert.deepEqual(state.exercises.map((e) => e.name), ['Fly', 'Leg press', 'Shoulder press', 'Row']);
+});
+
+test('a settled day teaches the list its order: what was done in the order started, a superset as one', () => {
+  const { state, press, row, curl, b } = setup();
+  const ex = (name, days) => newExercise({ name, variants: [], sets: 2, low: 8, high: 12, step: 5, rest: 90, days });
+  const fly = ex('Fly', ['Monday', 'Thursday']);
+  const dips = ex('Dips', ['Monday', 'Thursday']);
+  const pushdown = ex('Pushdown', ['Monday', 'Thursday']);
+  const legs = ex('Leg press', ['Tuesday', 'Friday']);
+  curl.days = ['Monday'];
+  // Bench days: press, row, curl, fly, then dips + pushdown as a superset, with a squat-day exercise among them.
+  state.exercises = [press, row, legs, curl, fly, dips, pushdown];
+  setLink(state, dips, pushdown);
+  const names = () => state.exercises.map((e) => e.name);
+  const at = (minute) => `2026-11-02T17:${String(minute).padStart(2, '0')}:00.000Z`;
+  const did = (session, e, ...minutes) => { ensureEntry(session, e, null).sets = minutes.map((m) => ({ weight: 50, reps: 10, at: at(m) })); };
+  const mon = b.log[0][0];
+  mon.date = '2026-11-02';
+  // Done: the superset first (pushdown's set logged before dips' counts as the pair starting), then the fly,
+  // then the press. The row is skipped and the curl never touched: both keep their places.
+  did(mon, pushdown, 1, 4);
+  did(mon, dips, 2, 5);
+  did(mon, fly, 10, 12);
+  ensureEntry(mon, row, null).skipped = true;
+  did(mon, press, 20, 22);
+  assert.equal(learnOrder(state, mon), true);
+  assert.deepEqual(names(), ['Dips', 'Pushdown', 'Leg press', 'Row', 'Curl', 'Fly', 'Shoulder press']);
+  assert.deepEqual(dayGroups(state, mon).map((g) => g.map((e) => e.name)), [['Dips', 'Pushdown'], ['Row'], ['Curl'], ['Fly'], ['Shoulder press']]);
+  // Done again in the same order, nothing changes.
+  assert.equal(learnOrder(state, mon), false);
+  // Thursday has no row or curl: only Thursday's exercises trade places, and Monday's own keep theirs in the list.
+  const thu = b.log[0][3];
+  thu.date = '2026-11-05';
+  did(thu, press, 1);
+  did(thu, fly, 5);
+  did(thu, dips, 9);
+  assert.equal(learnOrder(state, thu), true);
+  assert.deepEqual(names(), ['Shoulder press', 'Fly', 'Leg press', 'Row', 'Curl', 'Dips', 'Pushdown']);
+  // Monday is older than a Thursday with accessories logged, so going back to it changes nothing.
+  assert.equal(learnOrder(state, mon), false);
+  assert.deepEqual(names(), ['Shoulder press', 'Fly', 'Leg press', 'Row', 'Curl', 'Dips', 'Pushdown']);
+  // A day with nothing done, or no date, teaches nothing.
+  const tue = b.log[0][1];
+  tue.date = '2026-11-03';
+  ensureEntry(tue, legs, null).skipped = true;
+  assert.equal(learnOrder(state, tue), false);
+  assert.equal(learnOrder(state, b.log[1][0]), false);
 });
 
 test('warm-up ticks, how a heavy day moved and the plates owned are kept when they check out', () => {

@@ -139,6 +139,15 @@ a time. Tap an exercise to set its days, sets, rep range (e.g. 3 × 8–12), wei
 arrows put a day's exercises in the order you do them.
 **Add an exercise** on a training day adds one to that day only.
 
+- **The order you work in is remembered.** Once a day's accessories are all done or skipped (the last
+  set, the last skip, **Skip the rest** or **End workout**, or by itself when you log on a later day),
+  the ones you did move into the order you started them, for every day of that kind: do the seated leg
+  curl before the hack squat on Friday and Tuesday lists it first too. A superset moves as one. Skipped
+  ones keep their place, since a skip says nothing about order, and other days' exercises don't move. A
+  toast says when the order changed. Going back to fix an older day never changes it once a later day
+  of the same kind has accessories logged. The arrows still move one by hand, until the next workout
+  done in another order.
+
 - **Skip** on an accessory's line (or **Skip today** inside it) for anything you don't do that day;
   nothing is counted against it. **Undo** brings it back.
 - **Skip the rest** ends the day's accessories: anything not started is skipped, and anything stopped

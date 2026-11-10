@@ -2,6 +2,7 @@
 // (double progression). No DOM access here so it can be tested in Node.
 import { LIFTS, SCHEDULE, BAR, PLATES, FEELS, FINISH_WEEK, estimateMax, tidy, roundTo } from './logic.js';
 import { picKeys } from './pics.js';
+import { MUSCLES, LIFT_MUSCLES, isOldMuscle, fillMuscles, creditsOf } from './muscles.js';
 
 export const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 // The week's three kinds of day, named for their lift: Monday and Thursday share their accessories (bench),
@@ -14,11 +15,6 @@ export const DAY_KINDS = SCHEDULE.reduce((kinds, s) => {
 }, []);
 export const EXTRA_DEFAULTS = { sets: 3, low: 8, high: 12, rest: 90 };
 export const EXTRA_STEP = { lb: 5, kg: 2.5 };
-
-// What a muscle gets credit for in the weekly set count. Each exercise names one; the main lifts count
-// toward the muscle they train most.
-export const MUSCLES = ['Chest', 'Shoulders', 'Triceps', 'Back', 'Biceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Abs', 'Other'];
-export const LIFT_MUSCLE = { bench: 'Chest', squat: 'Quads', deadlift: 'Back' };
 
 // How an exercise is loaded with plates, and what's on before them: plate math uses it.
 export const LOADS = {
@@ -74,9 +70,19 @@ export function newExercise(fields) {
   return { id: makeId(), ...fields };
 }
 
-// The accessories shown on a training day: the day's list in order, then anything else logged with it.
+// An exercise on a break (`paused`) keeps its days, settings and log but is on no day's list until it's brought
+// back. It's a field of its own so its days are still there to come back to, and older versions of the app pass
+// it through untouched.
+export const isPaused = (exercise) => exercise?.paused === true;
+// Whether an exercise is on a day's list.
+export const onDay = (exercise, day) => !isPaused(exercise) && exercise.days.includes(day);
+// The exercises on a break that would otherwise be on a day's list.
+export const pausedOn = (state, day) => state.exercises.filter((e) => isPaused(e) && e.days.includes(day));
+
+// The accessories shown on a training day: the day's list in order, then anything else logged with it (so one
+// on a break still shows on the days it was logged).
 export function dayExtras(state, session) {
-  const listed = state.exercises.filter((e) => e.days.includes(session.day));
+  const listed = state.exercises.filter((e) => onDay(e, session.day));
   const added = (session.extras ?? [])
     .map((x) => state.exercises.find((e) => e.id === x.exercise))
     .filter((e) => e && !listed.includes(e));
@@ -333,15 +339,18 @@ export function records(history, exercise = null, unit = 'lb') {
   return { heaviest, best, volume: tidy(volume) };
 }
 
-// Hard sets per muscle in one training week: the main lift's logged sets and every accessory set logged.
+// Hard sets per muscle in one training week: the main lift's logged sets and every accessory set logged. A set
+// counts in full for the exercise's main muscle and as half for each one it also works (muscles.js creditsOf).
 // An exercise with no muscle counts under null.
 export function muscleSets(state, sessions) {
   const count = new Map();
-  const add = (muscle, n) => n && count.set(muscle, (count.get(muscle) ?? 0) + n);
+  const add = (of, n) => {
+    if (n) for (const [muscle, share] of creditsOf(of)) count.set(muscle, (count.get(muscle) ?? 0) + n * share);
+  };
   for (const s of sessions) {
-    if (!s.skipped) add(LIFT_MUSCLE[s.lift], s.reps.filter((r) => r !== null).length);
+    if (!s.skipped) add(LIFT_MUSCLES[s.lift], s.reps.filter((r) => r !== null).length);
     for (const x of s.extras ?? []) {
-      if (!x.skipped) add(state.exercises.find((e) => e.id === x.exercise)?.muscle ?? null, x.sets.filter(Boolean).length);
+      if (!x.skipped) add(state.exercises.find((e) => e.id === x.exercise), x.sets.filter(Boolean).length);
     }
   }
   return count;
@@ -366,23 +375,27 @@ function setsToCome(session, exercise, week) {
 
 // How each muscle's training week is going, as { sets, target }: `sets` is what's logged on every day plus the
 // sets still to come from day `from` on (earlier days are over), and `target` is MUSCLE_TARGET, or the plan's sets
-// for the muscle when fewer. A muscle not set, or Other, isn't counted.
+// for the muscle when fewer. Sets count as in muscleSets: half for a muscle an exercise also works. A muscle not
+// set, or Other, isn't counted, and neither is the plan of an exercise on a break.
 export function muscleOutlook(state, sessions, week, from) {
   const out = new Map();
-  const add = (muscle, key, n) => {
+  const tally = (muscle, key, n) => {
     if (!muscle || muscle === 'Other' || !n) return;
     const m = out.get(muscle) ?? { sets: 0, plan: 0 };
     m[key] += n;
     out.set(muscle, m);
   };
-  for (const [muscle, n] of muscleSets(state, sessions)) add(muscle, 'sets', n);
+  const add = (of, key, n) => {
+    for (const [muscle, share] of creditsOf(of)) tally(muscle, key, n * share);
+  };
+  for (const [muscle, n] of muscleSets(state, sessions)) tally(muscle, 'sets', n);
   sessions.forEach((s, i) => {
-    const lift = LIFT_MUSCLE[s.lift];
+    const lift = LIFT_MUSCLES[s.lift];
     add(lift, 'plan', s.reps.length);
-    for (const e of state.exercises) if (e.days.includes(s.day)) add(e.muscle, 'plan', plannedSets(e, week));
+    for (const e of state.exercises) if (onDay(e, s.day)) add(e, 'plan', plannedSets(e, week));
     if (i < from) return;
     if (!s.skipped && !s.ended) add(lift, 'sets', s.reps.filter((r) => r === null).length);
-    for (const e of dayExtras(state, s)) add(e.muscle, 'sets', setsToCome(s, e, week));
+    for (const e of dayExtras(state, s)) add(e, 'sets', setsToCome(s, e, week));
   });
   return new Map([...out].map(([muscle, { sets, plan }]) => [muscle, { sets, target: Math.min(MUSCLE_TARGET, plan) }]));
 }
@@ -431,7 +444,7 @@ export function dropOffers(state, here, from = here[2]) {
   const outlook = muscleOutlook(state, sessions, week, Math.min(from, index));
   const short = (muscle) => Boolean(outlook.get(muscle)) && outlook.get(muscle).sets < outlook.get(muscle).target;
   return state.exercises
-    .filter((e) => e.days.includes(session.day) && entryOf(session, e.id)?.skipped && !short(e.muscle))
+    .filter((e) => onDay(e, session.day) && entryOf(session, e.id)?.skipped && !short(e.muscle))
     .map((exercise) => ({ exercise, times: skipStreak(state, exercise.id, here) + 1 }))
     .filter((d) => d.times >= SKIPS_TO_DROP);
 }
@@ -519,9 +532,13 @@ const isTime = (t) => typeof t === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\
 const text = (s, max) => typeof s === 'string' && s.trim().length > 0 && s.length <= max;
 const int = (n, lo, hi) => Number.isInteger(n) && n >= lo && n <= hi;
 
-// A muscle, plate, counted or picture setting that isn't one of the choices is dropped, keeping the exercise.
+// A muscle, plate, counted, break or picture setting that isn't one of the choices is dropped, keeping the
+// exercise. Its muscles are then filled in, or brought up to date, from its name (muscles.js fillMuscles).
 function cleanChoices(e) {
-  if (e && e.muscle !== undefined && e.muscle !== null && !MUSCLES.includes(e.muscle)) delete e.muscle;
+  if (e && e.muscle !== undefined && e.muscle !== null && !MUSCLES.includes(e.muscle) && !isOldMuscle(e.muscle)) delete e.muscle;
+  if (e && e.also !== undefined && !Array.isArray(e.also)) delete e.also;
+  if (e && e.paused !== undefined && typeof e.paused !== 'boolean') delete e.paused;
+  if (e && typeof e === 'object' && typeof e.name === 'string') fillMuscles(e);
   if (e && e.pic !== undefined && e.pic !== null && !(typeof e.pic === 'string' && picKeys.has(e.pic))) delete e.pic;
   if (e && e.plates !== undefined && e.plates !== null && !(typeof e.plates === 'string' && Object.hasOwn(LOADS, e.plates))) delete e.plates;
   if (e && e.counted !== undefined && typeof e.counted !== 'boolean') delete e.counted;

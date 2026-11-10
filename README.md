@@ -122,8 +122,8 @@ ACSM 2009):
 | before a "2+" set or attempt | 4:00 | 5:00  | 5:00     |
 
 **−30 s** and **+30 s** take time off or add it; taking off the last of it ends the rest. The screen
-stays on while it runs and the bar turns white when rest is over. One tone plays at 10 seconds left
-and three at zero. Tones only play while the app is open (iPhone pauses web apps in the background)
+stays on while it runs and the bar turns white when rest is over. Three tones play at zero, and
+nothing before then. Tones only play while the app is open (iPhone pauses web apps in the background)
 and follow the ring/silent switch: getting past it would mean stopping your music.
 **Settings → Rest timer** sets Sound, Silent or Off.
 
@@ -154,14 +154,15 @@ arrows put a day's exercises in the order you do them.
   partway keeps just the sets you logged. A day also ends this way by itself once you log on a later
   day.
 - Skipping an accessory that leaves its muscle short for the week says so when you tap Skip (Undo is
-  on its line): "Your only direct work for glutes this week", or "Without it: back at 9 of 10 sets this
+  on its line): "Your only work for calves this week", or "Without it: lats at 7.5 of 10 sets this
   week". Short means under 10 sets (the low end of the shaded band in History → Muscles), or under what
   the week's plan gives that muscle when that's less: two 3-set exercises make 6. The week counts what's
   logged plus what's still to come, today and on the days left, so a skip that a later day covers says
   nothing. The opened exercise shows the warning before you skip, and so does its closed line when you
   skipped it last time or the muscle was short last week too; it turns red when it was skipped the last
   2 times or more, or the muscle was short last week. It names the day's other exercises for that
-  muscle still to do. It's direct work only, because each exercise counts toward one muscle. Skipping
+  muscle still to do. The warning is about the exercise's main muscle, and the count includes the half
+  sets from exercises that also work it. Skipping
   never asks first, and weeks 7 and 8 (light on purpose) don't warn. **Skip the rest** and **End
   workout** name any muscle they leave short.
 - An exercise skipped 3 times running while its muscle's week stays on target is offered off that kind of
@@ -193,7 +194,17 @@ arrows put a day's exercises in the order you do them.
   over 0 to 10 (3, or 2.5) for any other exercise switches it to plates a side, going up half a plate at
   a time: a decimal as you type it, a whole number once it's done. 0 stays body weight, and switching
   back in the editor reads the logged numbers as weights again.
-- Each exercise names the muscle it counts toward, for the weekly set count in History.
+- Each exercise names its **main muscle** and up to 3 it **also works**, for the weekly set count in
+  History: a set counts as one for the main muscle and as half for each of the others, so a bench press
+  set is 1 for chest and ½ each for triceps and front delts. The back is split into lats, upper back and
+  lower back, and the shoulders into front, side and rear delts. A new exercise's muscles are filled in
+  from its name as you type it (and exercises from before this were filled in the same way); change
+  them in the editor whenever they're off.
+- **On a break** in the editor takes an exercise off its days without losing anything: its days,
+  settings and history stay, it's left out of the week's plan for its muscles, and the days it was on
+  list it under the accessories ("On a break: …") so it isn't forgotten. Settings → Accessories marks it,
+  and unticking On a break puts it back where it was. It can still be added to a single day with **Add
+  an exercise**.
 - Each exercise shows a line drawing beside its name, picked from the name (and the variant in use);
   the editor's **Picture** row lets you choose another. The drawings are from
   [Open Exercise Art](https://github.com/AlexMollard/Open-Exercise-Art) by Alex Mollard
@@ -281,8 +292,10 @@ chart of all of them by date appears. A block's maxes are dated the day it start
 actually hit them in Settings → Current maxes.
 
 **Muscles**: hard sets per muscle for a training week, with the week before, against the 10–20 sets a
-week that's a common target for growth. Main lift sets count toward chest (bench), quads (squat) and
-back (deadlift).
+week that's a common target for growth. A set counts as one for an exercise's main muscle and as half
+for each muscle it also works, so counts can end in .5. Main lift sets count too: bench for chest, plus
+triceps and front delts; squat for quads, plus glutes and lower back; deadlift for lower back, plus
+glutes, hamstrings and upper back.
 
 **Accessories**: each exercise's heaviest set, estimated max, best session, a chart of its best set
 by session, and recent sessions. **Time**: how long a typical day of each kind takes, recent days, and
@@ -298,7 +311,8 @@ haven't finished, which you can make up then. Back on screen on a later day, the
 
 A day passed over (never started, before the day due or a later day you trained) is marked missed, and a notice
 offers to skip it in one tap; **Not now** puts that off. Tap the day to do it instead. Skipped days don't count
-for or against your next max, and **Skip this day** on any day does the same (undo is available). If you skip most
+for or against your next max, and **Skip this day** on any day does the same (undo is available). Skipping the
+day due today, on its own day of the week, asks first; a missed day or one ahead skips at once. If you skip most
 of a week, the app offers to repeat it; after two or more weeks off, it offers to restart the block at week 1.
 
 Starting a day ahead of today's (Start workout, a warm-up tick or a set on a later day, say while looking at

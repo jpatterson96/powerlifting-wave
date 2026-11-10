@@ -1,5 +1,5 @@
 // Bump the version whenever any file changes so phones pick up the new copy.
-const CACHE = 'wave-v30';
+const CACHE = 'wave-v31';
 const FILES = [
   './',
   'index.html',
@@ -10,6 +10,7 @@ const FILES = [
   'rest.js',
   'charts.js',
   'extras.js',
+  'muscles.js',
   'merge.js',
   'pad.js',
   'pics.js',

@@ -160,7 +160,7 @@ test('a new best beats every earlier session of the variant; a first time is not
 
 test('weekly sets count the main lift and accessories by muscle, leaving out skips', () => {
   const { state, press, row, b } = setup();
-  press.muscle = 'Shoulders';
+  Object.assign(press, { muscle: 'Front delts', also: ['Triceps'] });
   const mon = b.log[0][0];
   mon.reps = [6, 6, null];
   ensureEntry(mon, press, 'Dumbbell').sets = [{ weight: 50, reps: 10 }, { weight: 50, reps: 9 }, null];
@@ -169,22 +169,24 @@ test('weekly sets count the main lift and accessories by muscle, leaving out ski
   tue.skipped = true;
   tue.reps = [5, 5, 5];
   const counts = muscleSets(state, b.log[0]);
-  assert.deepEqual(Object.fromEntries(counts), { Chest: 2, Shoulders: 2 });
+  // Two bench sets: 2 for chest and half each for triceps and front delts. Two presses: 2 for front delts, 1 triceps.
+  assert.deepEqual(Object.fromEntries(counts), { Chest: 2, Triceps: 2, 'Front delts': 3 });
   ensureEntry(b.log[0][3], row, null).sets = [{ weight: 100, reps: 8 }];
   assert.equal(muscleSets(state, b.log[0]).get(null), 1); // no muscle set
 });
 
-// Bench days with plenty of chest and one row, squat days with one glute exercise and two for hamstrings.
+// Bench days with plenty of chest and one row, squat days with one glute exercise and two for calves. The exercises
+// name a main muscle only; the main lifts bring their halves (the squat's for glutes, the deadlift's for upper back).
 function skipSetup() {
   const state = { ...emptyState(), blocks: [newBlock(MAX, '2026-11-02')] };
   const make = (name, muscle, days) => newExercise({ name, muscle, variants: [], sets: 3, low: 8, high: 12, step: 5, rest: 90, days });
   const ex = {
     press: make('Incline press', 'Chest', ['Monday', 'Thursday']),
     fly: make('Fly', 'Chest', ['Monday', 'Thursday']),
-    row: make('Row', 'Back', ['Monday', 'Thursday']),
+    row: make('Row', 'Upper back', ['Monday', 'Thursday']),
     thrust: make('Hip thrust', 'Glutes', ['Tuesday', 'Friday']),
-    lying: make('Lying leg curl', 'Hamstrings', ['Tuesday', 'Friday']),
-    seated: make('Seated leg curl', 'Hamstrings', ['Tuesday', 'Friday']),
+    standing: make('Standing calf raise', 'Calves', ['Tuesday', 'Friday']),
+    seated: make('Seated calf raise', 'Calves', ['Tuesday', 'Friday']),
   };
   state.exercises.push(...Object.values(ex));
   return { state, ...ex, b: state.blocks[0] };
@@ -192,31 +194,34 @@ function skipSetup() {
 const three = [{ weight: 100, reps: 10 }, { weight: 100, reps: 10 }, { weight: 100, reps: 10 }];
 
 test('a skip warns when it leaves its muscle under 10 sets for the week, or under the plan when that is less', () => {
-  const { state, fly, row, thrust, lying, seated, b } = skipSetup();
+  const { state, fly, row, thrust, standing, seated, b } = skipSetup();
   const [mon, tue, , , fri] = b.log[0];
   // Chest has the bench and two exercises twice a week, so the fly can go.
   assert.equal(skipConcern(state, [0, 0, 0], fly), null);
   assert.deepEqual(Object.fromEntries(muscleOutlook(state, b.log[0], 0, 0)), {
-    Chest: { sets: 18, target: 10 }, Back: { sets: 9, target: 9 }, Quads: { sets: 6, target: 6 },
-    Glutes: { sets: 6, target: 6 }, Hamstrings: { sets: 12, target: 10 },
+    Chest: { sets: 18, target: 10 }, Triceps: { sets: 3, target: 3 }, 'Front delts': { sets: 3, target: 3 },
+    'Upper back': { sets: 7.5, target: 7.5 }, Quads: { sets: 6, target: 6 }, 'Lower back': { sets: 6, target: 6 },
+    Glutes: { sets: 10.5, target: 10 }, Hamstrings: { sets: 1.5, target: 1.5 }, Calves: { sets: 12, target: 10 },
   });
-  // The row is most of the back's week: the plan's 9 sets is the target, as it's under 10.
-  assert.deepEqual(skipConcern(state, [0, 0, 0], row), { muscle: 'Back', sets: 6, target: 9, done: 0, others: [], streak: 0, lastWeek: null });
-  // Hamstrings fall under 10 without the lying curl; the seated one is still to come today.
-  assert.deepEqual(skipConcern(state, [0, 0, 1], lying), { muscle: 'Hamstrings', sets: 9, target: 10, done: 0, others: [seated], streak: 0, lastWeek: null });
-  assert.equal(skipConcern(state, [0, 0, 1], thrust).sets, 3);
+  // The row is most of the upper back's week: the plan's 7.5 sets is the target, as it's under 10.
+  assert.deepEqual(skipConcern(state, [0, 0, 0], row), { muscle: 'Upper back', sets: 4.5, target: 7.5, done: 0, others: [], streak: 0, lastWeek: null });
+  // Calves fall under 10 without the standing raise; the seated one is still to come today.
+  assert.deepEqual(skipConcern(state, [0, 0, 1], standing), { muscle: 'Calves', sets: 9, target: 10, done: 0, others: [seated], streak: 0, lastWeek: null });
+  // Without Tuesday's hip thrust, glutes keep Friday's and the halves from the squats and the deadlift.
+  assert.equal(skipConcern(state, [0, 0, 1], thrust).sets, 7.5);
 
-  // Tuesday: hip thrust and lying curl skipped, seated curl done. On Friday the hip thrust is the only glute work.
+  // Tuesday: hip thrust and standing raise skipped, seated raise done. On Friday, without the hip thrust, the
+  // glutes only get the squat's halves.
   ensureEntry(tue, thrust, null).skipped = true;
-  ensureEntry(tue, lying, null).skipped = true;
+  ensureEntry(tue, standing, null).skipped = true;
   ensureEntry(tue, seated, null).sets = three;
-  assert.deepEqual(skipConcern(state, [0, 0, 4], thrust), { muscle: 'Glutes', sets: 0, target: 6, done: 0, others: [], streak: 1, lastWeek: null });
+  assert.deepEqual(skipConcern(state, [0, 0, 4], thrust), { muscle: 'Glutes', sets: 1.5, target: 10, done: 0, others: [], streak: 1, lastWeek: null });
   ensureEntry(fri, seated, null).sets = three;
-  assert.deepEqual(skipConcern(state, [0, 0, 4], lying), { muscle: 'Hamstrings', sets: 6, target: 10, done: 6, others: [], streak: 1, lastWeek: null });
+  assert.deepEqual(skipConcern(state, [0, 0, 4], standing), { muscle: 'Calves', sets: 6, target: 10, done: 6, others: [], streak: 1, lastWeek: null });
 
   // Days before `from` are over, so what they didn't log doesn't count; looking ahead from an earlier due day, it does.
   ensureEntry(mon, row, null).skipped = true;
-  assert.equal(skipConcern(state, [0, 0, 3], row, 2).sets, 3); // Thursday seen on Wednesday: the deadlift's to come
+  assert.equal(skipConcern(state, [0, 0, 3], row, 2).sets, 1.5); // Thursday seen on Wednesday: the deadlift's halves are to come
   assert.equal(skipConcern(state, [0, 0, 3], row).sets, 0);
   mon.ended = '2026-11-02T18:00:00Z';
   assert.equal(muscleOutlook(state, b.log[0], 0, 0).get('Chest').sets, 9); // an ended day has nothing to come
@@ -286,7 +291,9 @@ test('bad accessory data is dropped without losing the log', () => {
   const saved = JSON.parse(JSON.stringify(state));
   saved.exercises.push({ id: 'BAD id', name: '<b>' });
   saved.exercises.push({ ...saved.exercises[0], id: 'selfie', link: 'selfie' }); // can't superset with itself
-  saved.exercises[1].muscle = 'Lats'; // not a choice: dropped, the exercise kept
+  saved.exercises[1].muscle = 'Wings'; // not a choice: dropped, the exercise kept and its muscle read from its name
+  saved.exercises[1].also = 'Biceps';
+  saved.exercises[1].paused = 'yes';
   saved.exercises[1].plates = 'toString';
   saved.exercises[2].plates = 'ez';
   saved.blocks[0].log[0][0].extras.push({ exercise: 'x', variant: null, skipped: 'no', sets: [] });
@@ -298,7 +305,9 @@ test('bad accessory data is dropped without losing the log', () => {
   const clean = cleanExtras(upgrade(saved));
   assert.deepEqual(clean.pastMaxes, [{ date: '2025-06-01', lift: 'squat', value: 365 }]);
   assert.deepEqual(clean.blocks[0].maxDates, { squat: '2026-08-15' });
-  assert.equal('muscle' in clean.exercises[1] || 'plates' in clean.exercises[1], false);
+  assert.equal(clean.exercises[1].muscle, 'Upper back');
+  assert.deepEqual(clean.exercises[1].also, ['Lats', 'Biceps', 'Rear delts']);
+  assert.equal('paused' in clean.exercises[1] || 'plates' in clean.exercises[1], false);
   assert.equal(clean.exercises[2].plates, 'ez');
   assert.equal(isValidState(clean), true);
   assert.equal(clean.exercises.length, 3);

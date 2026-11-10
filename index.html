@@ -168,15 +168,20 @@
       <fieldset class="day-pick">
         <legend class="field-label">Shows up on</legend>
         <div class="day-boxes" id="exercise-days"></div>
+        <label class="check break-check"><input type="checkbox" name="paused"><span>On a break<small>Off its days until you turn this off. Its history and settings stay.</small></span></label>
       </fieldset>
       <label class="field">
         <span class="field-label">Superset with (optional)</span>
         <span class="field-row"><select class="text-input select-input" name="link" id="exercise-link"></select></span>
       </label>
       <label class="field">
-        <span class="field-label">Muscle it counts toward</span>
+        <span class="field-label">Main muscle (each set counts as one)</span>
         <span class="field-row"><select class="text-input select-input" name="muscle" id="exercise-muscle"></select></span>
       </label>
+      <fieldset class="day-pick">
+        <legend class="field-label">Also works (half a set each, up to 3)</legend>
+        <div class="day-boxes muscle-boxes" id="exercise-also"></div>
+      </fieldset>
       <label class="field">
         <span class="field-label">Plates</span>
         <span class="field-row"><select class="text-input select-input" name="plates" id="exercise-plates"></select></span>

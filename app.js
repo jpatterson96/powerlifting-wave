@@ -3,15 +3,16 @@ import {
   prescription, ROUNDING, REST_MODES, BAR, tidy, roundTo, workingMax, targetWeight, estimateMax, weekMax, attemptBase, attemptWeight, setWeight,
   singleWeight, restSeconds, platesPerSide, warmups, emptyState, newBlock, finishFor, setFinish, sessionStatus,
   weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, clearDay, longBreak, restartBlock, evaluateLift, liftHistory,
-  maxChanges, liftRecord, convertState, upgrade, PLATES, plateSizes, dueSession, missedSessions, FEELS, GRINDS, heavyFeel,
+  maxChanges, liftRecord, convertState, upgrade, PLATES, plateSizes, weekdayOf, dueSession, missedSessions, FEELS, GRINDS, heavyFeel,
   touched, testResult, dayPct, heatOf, liftPath, weekHeat,
 } from './logic.js';
 import {
-  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, MUSCLES, LIFT_MUSCLE, LOADS, PLATE, SMALL_PLATES, isCounted, countedPlates, weightOf, loadOf, PLATES_UP_TO, GUESSED_STEP, looksCounted, countInPlates, isLightWeek, plannedSets, newExercise,
+  WEEKDAYS, EXTRA_DEFAULTS, EXTRA_STEP, LOADS, PLATE, SMALL_PLATES, isCounted, countedPlates, weightOf, loadOf, PLATES_UP_TO, GUESSED_STEP, looksCounted, countInPlates, isLightWeek, plannedSets, newExercise,
   dayExtras, dayGroups, exercisesByDay, moveExercise, learnOrder, setLink, supersetOrder, entryOf, ensureEntry, finishExtras, exerciseHistory, earlierTimes, isNewBest, defaultVariant,
   suggestion, sessionBest, records, muscleSets, workoutTime, timedSessions, partTimes, logBodyweight, cleanExtras,
-  DAY_KINDS, muscleOutlook, skipConcern, dropOffers,
+  DAY_KINDS, muscleOutlook, skipConcern, dropOffers, isPaused, pausedOn,
 } from './extras.js';
+import { MUSCLES, LIFT_MUSCLES, ALSO_MAX, guessMuscles, cleanAlso, creditsOf } from './muscles.js';
 import { mergeLogs } from './merge.js';
 import { DECIMALS, press, typed, nudge } from './pad.js';
 import { PICS, picFor, picFile } from './pics.js';
@@ -26,7 +27,7 @@ import {
 
 const KEY = 'powerlifting-wave';
 // The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
-const VERSION = 'wave-v30';
+const VERSION = 'wave-v31';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -959,6 +960,13 @@ function extraTarget(exercise, entry, plan, set) {
   return { weight: null, reps: planned ? plan.reps[set] : exercise.low };
 }
 
+// The day's exercises on a break (extras.js isPaused) that aren't being done today anyway, so they aren't forgotten.
+function pausedLine(session, shown) {
+  const paused = pausedOn(state, session.day).filter((e) => !shown.includes(e));
+  if (!paused.length) return '';
+  return `<p class="hint extras-paused">On a break: ${esc(listDays(paused.map((e) => e.name)))}. Bring ${paused.length > 1 ? 'one' : 'it'} back in Settings → Accessories.</p>`;
+}
+
 // Accessories as a compact list: one line each, with the exercise (or superset) being done opened up.
 function extrasSection(session, i) {
   const groups = dayGroups(state, session);
@@ -972,6 +980,7 @@ function extrasSection(session, i) {
     <h3 class="extras-title">Accessories</h3>
     ${groups.length ? `<ol class="extra-list">${groups.map((g) => groupView(session, i, g, g[0].id === open)).join('')}</ol>`
       : `<p class="hint">Nothing on ${session.day}s yet. Add the exercises you do after your ${liftOf(session).name.toLowerCase()}.</p>`}
+    ${pausedLine(session, groups.flat())}
     <div class="extras-end">
       <button class="btn-quiet" data-action="extra-add" data-index="${i}" data-key="extra-add-${i}">Add an exercise</button>
       ${end}
@@ -1009,14 +1018,15 @@ function concernFor(session, i, e) {
   return skipConcern(state, here(i), e, weekFrom());
 }
 
-// It says "direct" because each exercise counts toward one muscle: a squat does nothing for glutes here.
+// The warning is about the exercise's main muscle. Its sets include the halves from exercises that also work it
+// (a squat's for glutes), so they can end in .5.
 function concernText(c) {
   const m = c.muscle.toLowerCase();
-  const head = c.sets > c.done ? `Without it: ${m} at ${c.sets} of ${c.target} sets this week.`
-    : c.done ? `The last direct work for ${m} this week: ${c.done} of ${c.target} sets without it.`
-      : `Your only direct work for ${m} this week.`;
+  const head = c.sets > c.done ? `Without it: ${m} at ${fmt(c.sets)} of ${fmt(c.target)} sets this week.`
+    : c.done ? `The last work for ${m} this week: ${fmt(c.done)} of ${fmt(c.target)} sets without it.`
+      : `Your only work for ${m} this week.`;
   const streak = c.streak > 1 ? ` Skipped the last ${c.streak} times.` : c.streak ? ' Skipped last time too.' : '';
-  const lastWeek = c.lastWeek === null ? '' : ` Short last week too: ${c.lastWeek} of ${c.target}.`;
+  const lastWeek = c.lastWeek === null ? '' : ` Short last week too: ${fmt(c.lastWeek)} of ${fmt(c.target)}.`;
   const others = c.others.length ? ` ${listDays(c.others.map((e) => e.name))} ${c.others.length > 1 ? 'are' : 'is'} still left today.` : '';
   return `${head}${streak}${lastWeek}${others}`;
 }
@@ -1039,7 +1049,7 @@ function shortWeekText(i, skipped) {
   const outlook = muscleOutlook(state, block().log[ui.week], ui.week, Math.min(weekFrom(), i));
   const short = [...new Set(skipped.map((e) => e.muscle))].filter((m) => outlook.get(m) && outlook.get(m).sets < outlook.get(m).target);
   if (!short.length) return '';
-  return ` Short this week: ${short.map((m) => `${m.toLowerCase()} ${outlook.get(m).sets} of ${outlook.get(m).target}`).join(', ')} sets.`;
+  return ` Short this week: ${short.map((m) => `${m.toLowerCase()} ${fmt(outlook.get(m).sets)} of ${fmt(outlook.get(m).target)}`).join(', ')} sets.`;
 }
 
 // One exercise's line in the list: name, a light per set, either today's sets or last time's, and what skipping it
@@ -2166,6 +2176,9 @@ function totalStats() {
 // for growth, with the week before for comparison.
 const SET_TARGET = [10, 20];
 
+// An exercise's muscles in words: "Chest, plus triceps and front delts".
+const musclesText = ({ muscle, also = [] }) => (muscle ? `${muscle}${also.length ? `, plus ${listDays(also.map((m) => m.toLowerCase()))}` : ''}` : '');
+
 function musclesHistory() {
   const b = block();
   const now = currentWeek(b);
@@ -2173,7 +2186,7 @@ function musclesHistory() {
   const prevBlock = state.blocks[state.blocks.length - 2];
   const counts = muscleSets(state, b.log[week]);
   const before = week ? muscleSets(state, b.log[week - 1]) : prevBlock ? muscleSets(state, prevBlock.log[BLOCK_WEEKS - 1]) : null;
-  const assigned = new Set([...Object.values(LIFT_MUSCLE), ...state.exercises.map((e) => e.muscle ?? null)]);
+  const assigned = new Set([...Object.values(LIFT_MUSCLES), ...state.exercises].flatMap((x) => creditsOf(x).map(([m]) => m)));
   const shown = [...MUSCLES, null].filter((m) => counts.has(m) || before?.has(m) || (m !== null && assigned.has(m)));
   const scale = Math.max(SET_TARGET[1] + 4, ...counts.values());
   const pct = (n) => `${(n / scale) * 100}%`;
@@ -2182,7 +2195,7 @@ function musclesHistory() {
     const was = before && (before.get(m) ?? 0);
     return `<li class="muscle-row${n ? '' : ' is-empty'}">
       <span class="muscle-name">${m ?? 'Muscle not set'}</span>
-      <span class="muscle-count"><strong>${n}</strong> ${n === 1 ? 'set' : 'sets'}${before ? `<span class="muscle-was">, ${was} the week before</span>` : ''}</span>
+      <span class="muscle-count"><strong>${fmt(n)}</strong> ${n === 1 ? 'set' : 'sets'}${before ? `<span class="muscle-was">, ${fmt(was)} the week before</span>` : ''}</span>
       <span class="muscle-track" aria-hidden="true">
         <span class="muscle-band" style="left:${pct(SET_TARGET[0])};width:${pct(SET_TARGET[1] - SET_TARGET[0])}"></span>
         <span class="muscle-fill" style="width:${pct(n)}"></span>
@@ -2197,7 +2210,8 @@ function musclesHistory() {
     </div>
     <p class="hint">Sets logged for each muscle in this training week. The shaded part of each bar is ${SET_TARGET[0]}–${SET_TARGET[1]} sets, a common weekly target for growth.${isLightWeek(week) ? ' Weeks 7 and 8 are lighter on purpose.' : ''}</p>
     <ul class="muscle-list">${rows}</ul>
-    <p class="hint">Main lift sets count too: bench for chest, squat for quads, deadlift for back.${unset ? ` ${plural(unset, 'accessory')} ${unset === 1 ? 'has' : 'have'} no muscle yet; set it in Settings → Accessories.` : ''}</p>`;
+    <p class="hint">A set counts in full for an exercise's main muscle and as half for each muscle it also works, which is where the .5s come from. Main lift sets count too: ${LIFTS
+    .map((l) => `${l.short.toLowerCase()} for ${musclesText(LIFT_MUSCLES[l.id]).toLowerCase()}`).join('; ')}.${unset ? ` ${plural(unset, 'accessory')} ${unset === 1 ? 'has' : 'have'} no muscle yet; set it in Settings → Accessories.` : ''}</p>`;
 }
 
 function chartFigure(kind, label, svg) {
@@ -2538,7 +2552,8 @@ function exercisesSection() {
     const open = ui.exerciseKind === key;
     const head = `<h3 class="index-group-head"><button class="index-group" data-action="exercise-kind" data-kind="${key}" data-key="exercise-kind-${key}" aria-expanded="${open}">
         <span class="index-group-name">${lift ? kindName(k) : 'No set days'}</span>
-        <span class="index-group-days">${lift ? listDays(k.days) : 'Only when added to a day'}. ${k.exercises.length ? plural(k.exercises.length, 'exercise') : 'None yet'}</span>
+        <span class="index-group-days">${lift ? listDays(k.days) : 'Only when added to a day'}. ${k.exercises.length ? plural(k.exercises.length, 'exercise') : 'None yet'}${
+  k.exercises.some(isPaused) ? `, ${k.exercises.filter(isPaused).length} on a break` : ''}</span>
       </button></h3>`;
     if (!open) return head;
     const ownDays = (e) => e.days.length === k.days.length && e.days.every((d) => k.days.includes(d));
@@ -2548,10 +2563,10 @@ function exercisesSection() {
       const days = ownDays(e) ? '' : `, ${e.days.map(shortDay).join(', ')}`;
       const partner = exerciseById(e.link) ?? state.exercises.find((x) => x.link === e.id);
       const variants = `${e.variants.length ? `. ${e.variants.map(esc).join(' or ')}` : ''}${partner ? `. Superset with ${esc(partner.name)}` : ''}`;
-      return `<li class="exercise-row">
-        <button class="index-row" data-action="exercise-edit" data-exercise="${e.id}" data-key="exercise-edit-${key}-${e.id}">${picHTML(e)}<span class="index-text">
+      return `<li class="exercise-row${isPaused(e) ? ' is-paused' : ''}">
+        <button class="index-row" data-action="exercise-edit" data-exercise="${e.id}" data-key="exercise-edit-${key}-${e.id}">${picHTML(e, null, isPaused(e) ? 'is-dim' : '')}<span class="index-text">
           <span class="index-name">${esc(e.name)}</span>
-          <span class="index-meta">${e.sets} × ${e.low}–${e.high}${days}${e.muscle ? `. ${e.muscle}` : ''}${isCounted(e) ? '. In plates a side' : ''}${variants}</span>
+          <span class="index-meta">${isPaused(e) ? '<strong class="index-flag">On a break.</strong> ' : ''}${e.sets} × ${e.low}–${e.high}${days}${e.muscle ? `. ${musclesText(e)}` : ''}${isCounted(e) ? '. In plates a side' : ''}${variants}</span>
         </span></button>
         <button class="icon-btn" data-action="exercise-move" data-exercise="${e.id}" data-kind="${key}" data-by="-1" data-key="exercise-up-${key}-${e.id}"
           aria-label="Move ${esc(e.name)} up"${i === 0 ? ' disabled' : ''}>↑</button>
@@ -2973,6 +2988,23 @@ function okToStart(index) {
   });
 }
 
+// Skipping the day due today, on its own day of the week, asks first: it's the workout that's meant to happen, and
+// a stray tap would drop it. A missed day, one made up on another day, or one ahead skips at once (Undo skip is on
+// the day). True, or a promise of the answer.
+function okToSkip(index) {
+  const session = sessionAt(index);
+  const today = todayISO();
+  const due = dueSession(block(), today);
+  if (due?.week !== ui.week || due.index !== index || weekdayOf(today) !== session.day) return true;
+  const lift = liftOf(session).short.toLowerCase();
+  return ask({
+    title: `Skip today's ${lift}${session.kind === 'max' ? ' re-max' : ''}?`,
+    text: `Today is ${session.day}, this workout's day. Skipped, it won't count toward your next max.${hasWork(session) ? ' What you logged stays.' : ''}`,
+    yes: 'Skip it',
+    no: 'Keep it',
+  });
+}
+
 // Logs an accessory set (null clears it). Returns what to tell the lifter when the set settled the day and the
 // order it was done in became the list's (keepOrder), else ''.
 function logExtra(index, exercise, set, value) {
@@ -3029,7 +3061,7 @@ function openPick(index) {
   document.getElementById('pick-note').textContent = `Adds it to this ${session.day} only. To have it every week, set its days in Settings.`;
   document.getElementById('pick-list').innerHTML = others.map((e) => `
     <button class="index-row" data-action="extra-pick" data-exercise="${e.id}">${picHTML(e)}<span class="index-text">
-      <span class="index-name">${esc(e.name)}</span><span class="index-meta">${e.sets} × ${e.low}–${e.high}</span>
+      <span class="index-name">${esc(e.name)}</span><span class="index-meta">${e.sets} × ${e.low}–${e.high}${isPaused(e) ? '. On a break' : ''}</span>
     </span></button>`).join('');
   pickSheet.showModal();
 }
@@ -3054,7 +3086,8 @@ function openPast(index) {
 function openEditor(id, index = null) {
   const e = id ? exerciseById(id) : null;
   const day = index === null ? null : sessionAt(index).day;
-  ui.editing = { id, index };
+  // A new exercise's muscles follow its name as it's typed, until one is picked by hand.
+  ui.editing = { id, index, guessing: !e };
   const f = exerciseForm.elements;
   document.getElementById('exercise-title').textContent = e ? 'Edit exercise' : 'New exercise';
   document.getElementById('exercise-unit').textContent = isCounted(e) ? 'plates' : state.unit;
@@ -3070,8 +3103,12 @@ function openEditor(id, index = null) {
   document.getElementById('exercise-days').innerHTML = WEEKDAYS.map((d) => `
     <label class="day-box"><input type="checkbox" name="days" value="${d}"${days.includes(d) ? ' checked' : ''}><span>${shortDay(d)}</span></label>`).join('');
   const partner = e && (e.link ?? state.exercises.find((x) => x.link === e.id)?.id);
+  f.paused.checked = isPaused(e);
   document.getElementById('exercise-muscle').innerHTML = `<option value="">Not set</option>${MUSCLES
-    .map((m) => `<option value="${m}"${m === e?.muscle ? ' selected' : ''}>${m}</option>`).join('')}`;
+    .map((m) => `<option value="${m}">${m}</option>`).join('')}`;
+  document.getElementById('exercise-also').innerHTML = MUSCLES.filter((m) => m !== 'Other').map((m) => `
+    <label class="day-box"><input type="checkbox" name="also" value="${m}"><span>${m}</span></label>`).join('');
+  showMuscles(e ?? {});
   const loadLabel = (l) => (l.bar[state.unit] ? `${l.name[0].toUpperCase()}${l.name.slice(1)}, ${fmt(l.bar[state.unit])} ${state.unit}` : 'Plate-loaded machine, by weight');
   const loads = [['', 'None: dumbbells, cables or a stack'], ...Object.entries(LOADS).map(([k, l]) => [k, loadLabel(l)]),
     ['count', `Counted in plates a side (2.5 = ${platesText(2.5)})`]];
@@ -3084,6 +3121,15 @@ function openEditor(id, index = null) {
   document.getElementById('exercise-pics').innerHTML = picChoices(e?.pic ?? null, e?.name ?? '');
   pickSheet.close();
   exerciseSheet.showModal();
+}
+
+// Puts an exercise's muscles in the editor. The main one can't also be one it "also works".
+function showMuscles({ muscle = null, also = [] }) {
+  exerciseForm.elements.muscle.value = muscle ?? '';
+  for (const box of exerciseForm.querySelectorAll('input[name="also"]')) {
+    box.disabled = box.value === muscle;
+    box.checked = !box.disabled && also.includes(box.value);
+  }
 }
 
 // The editor's picture choices: Auto, showing what the name gives, then every picture there is.
@@ -3323,12 +3369,16 @@ const FORMS = {
     if (!(step > 0) || step > 100) return toast(`Set a weight jump above 0, like ${EXTRA_STEP[state.unit]} ${state.unit}.`);
     if (!Number.isInteger(rest) || rest < 15 || rest > 900) return toast('Rest must be 15 to 900 seconds.');
     const muscle = MUSCLES.includes(f.muscle.value) ? f.muscle.value : null;
+    const picked = [...form.querySelectorAll('input[name="also"]:checked')].map((c) => c.value);
+    if (picked.length > ALSO_MAX) return toast(`Pick up to ${ALSO_MAX} muscles it also works.`);
+    const also = muscle ? cleanAlso(picked, muscle) : [];
+    const paused = f.paused.checked;
     // Counted in plates a side is its own switch; the plate math modes are mutually exclusive with it.
     const counted = f.plates.value === 'count';
     const plates = !counted && Object.hasOwn(LOADS, f.plates.value) ? f.plates.value : null;
     // A picture picked by hand stays; Auto stores nothing, so a renamed exercise follows its new name.
     const pic = PICS.some(([key]) => key === f.pic.value) ? f.pic.value : null;
-    const fields = { name, variants, sets, low, high, step, rest, days, muscle, plates, counted, pic };
+    const fields = { name, variants, sets, low, high, step, rest, days, muscle, also, paused, plates, counted, pic };
     const { id, index } = ui.editing;
     let e = id ? exerciseById(id) : null;
     if (e) {
@@ -3337,7 +3387,7 @@ const FORMS = {
       e = newExercise({ ...fields, link: null });
       state.exercises.push(e);
       // Opened from a training day that isn't one of its days: it still shows up on that day.
-      if (index !== null && !days.includes(sessionAt(index).day)) entryFor(sessionAt(index), e, defaultVariant(state, e));
+      if (index !== null && (paused || !days.includes(sessionAt(index).day))) entryFor(sessionAt(index), e, defaultVariant(state, e));
       if (index !== null) ui.extraOpen = e.id;
     }
     // A pairing that's unchanged keeps its order; a new one puts this exercise first.
@@ -3353,7 +3403,7 @@ const FORMS = {
     save();
     exerciseSheet.close();
     render();
-    toast(id ? 'Exercise saved.' : `${name} added.`);
+    toast(!id ? `${name} added.` : paused ? `${name} is on a break. It stays off its days until you turn that off.` : 'Exercise saved.');
   },
   'bodyweight-form'(form) {
     const weight = tidy(parseFloat(form.elements.weight.value));
@@ -3490,8 +3540,10 @@ const ACTIONS = {
     render();
   },
   // Stays on the skipped day so the skip can be undone and its accessories still logged.
-  skip(el) {
-    sessionAt(Number(el.dataset.index)).skipped = true;
+  async skip(el) {
+    const index = Number(el.dataset.index);
+    if (!(await okToSkip(index))) return;
+    sessionAt(index).skipped = true;
     save();
     rest.stop();
     render();
@@ -4076,13 +4128,23 @@ document.addEventListener('keydown', (e) => {
   else ACTIONS['pad-key']({ dataset: { key } });
 });
 
-// The Auto picture follows the name as it's typed.
+// The Auto picture follows the name as it's typed, and so do a new exercise's muscles until one is picked by hand.
 exerciseForm.elements.name.addEventListener('input', (e) => {
+  if (ui.editing?.guessing) showMuscles(guessMuscles(e.target.value));
   const auto = picFor({ name: e.target.value });
   const el = document.getElementById('pic-auto');
   if (!el) return;
   el.className = `pic${auto ? '' : ' is-none'}`;
   el.style.setProperty('--pic', auto ? `url('${picFile(auto)}')` : 'none');
+});
+
+// A muscle picked by hand stays. A new main muscle is no longer one the exercise "also works".
+exerciseForm.addEventListener('change', (e) => {
+  if (e.target.name !== 'muscle' && e.target.name !== 'also') return;
+  if (ui.editing) ui.editing.guessing = false;
+  if (e.target.name !== 'muscle') return;
+  const also = [...exerciseForm.querySelectorAll('input[name="also"]:checked')].map((c) => c.value);
+  showMuscles({ muscle: e.target.value || null, also });
 });
 
 // Switching an exercise to or from plates a side changes what its weight jump is counted in.

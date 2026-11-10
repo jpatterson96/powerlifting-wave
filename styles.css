@@ -2732,6 +2732,48 @@ html:has(.sheet[open]) {
   outline-offset: 2px;
 }
 
+/* The muscles an exercise also works: the same boxes as the days, as wide as their names. The main muscle's box
+   is off, as it already counts in full. */
+.muscle-boxes .day-box span {
+  min-width: 0;
+  padding: 8px 12px;
+  font-size: 15px;
+}
+
+.muscle-boxes .day-box input:disabled + span {
+  border-style: dashed;
+  opacity: 0.4;
+}
+
+/* On a break: under the days, with what it does in smaller words. */
+.break-check {
+  align-items: flex-start;
+  margin-top: 14px;
+}
+
+.break-check input {
+  flex: none;
+  margin-top: 1px;
+}
+
+.break-check small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+/* An exercise on a break, in Settings: still there to edit, set back a little. */
+.exercise-row.is-paused .index-name {
+  color: var(--muted);
+}
+
+.index-flag {
+  color: var(--chalk);
+  font-weight: 700;
+}
+
 .sheet-actions-end {
   display: flex;
   align-items: center;

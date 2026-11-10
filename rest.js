@@ -5,7 +5,6 @@
 const KEY = 'powerlifting-wave-rest';
 // Gone this long after it finished, the timer was forgotten, not ignored.
 const STALE_MS = 5 * 60 * 1000;
-const WARN_AT = 10;
 
 const box = document.getElementById('rest');
 const timeEl = document.getElementById('rest-time');
@@ -18,7 +17,6 @@ let mode = 'sound';
 let audio = null;
 let lock = null;
 let ticking = null;
-let warned = false;
 let rang = false;
 
 function read() {
@@ -54,10 +52,10 @@ function tone(at, length) {
   osc.stop(at + length + 0.02);
 }
 
-// One short tone 10 seconds out to get set up, three when rest is over.
-function ring(count) {
+// Three tones when rest is over, and nothing before then.
+function ring() {
   if (mode !== 'sound' || !audio || audio.state !== 'running') return;
-  for (let i = 0; i < count; i++) tone(audio.currentTime + i * 0.28, count === 1 ? 0.12 : 0.2);
+  for (let i = 0; i < 3; i++) tone(audio.currentTime + i * 0.28, 0.2);
 }
 
 // `wanted` is checked again when a request resolves, so a stop that lands mid-request still lets the screen sleep.
@@ -100,13 +98,9 @@ function paint() {
   timeEl.textContent = clock(Math.max(0, left));
   labelEl.textContent = done ? 'Rest done' : 'Rest';
   fillEl.style.transform = `scaleX(${done ? 1 : 1 - left / timer.total})`;
-  if (!done && left <= WARN_AT && !warned) {
-    warned = true;
-    ring(1);
-  }
   if (done && !rang) {
     rang = true;
-    ring(3);
+    ring();
     holdScreen(false);
   }
 }
@@ -139,7 +133,6 @@ export function prime() {
 export function start(seconds, next) {
   if (mode === 'off') return;
   timer = { end: Date.now() + seconds * 1000, total: seconds, next };
-  warned = false;
   rang = false;
   write();
   show();
@@ -153,7 +146,6 @@ export function add(seconds) {
   if (seconds < 0 && left === 0) return;
   const after = Math.max(0, left + seconds * 1000);
   timer = { ...timer, end: Date.now() + after, total: Math.max(timer.total, Math.ceil(after / 1000)) };
-  warned = Math.ceil(after / 1000) <= WARN_AT;
   rang = false;
   write();
   paint();
@@ -177,9 +169,7 @@ export function running() {
 // A timer left over from before the app was closed picks up where it is now, without replaying tones.
 export function resume() {
   if (!timer || mode === 'off') return stop();
-  const left = timer.end - Date.now();
-  warned = left <= WARN_AT * 1000;
-  rang = left <= 0;
+  rang = timer.end - Date.now() <= 0;
   show();
   if (!rang) holdScreen(true);
 }

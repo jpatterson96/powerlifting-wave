@@ -27,7 +27,7 @@ import {
 
 const KEY = 'powerlifting-wave';
 // The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
-const VERSION = 'wave-v31';
+const VERSION = 'wave-v32';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -792,7 +792,7 @@ function weighIn(session) {
   if (session.skipped) return '';
   const latest = state.bodyweight[state.bodyweight.length - 1];
   if (latest && latest.date >= weekStartISO()) return '';
-  return `<button class="btn-quiet day-weigh" data-action="bodyweight-open" data-key="weigh-in">Log body weight${latest
+  return `<button class="day-weigh" data-action="bodyweight-open" data-key="weigh-in">Log body weight${latest
     ? `<span class="day-weigh-last">, last ${fmt(latest.weight)} on ${shortDate(latest.date)}</span>` : ''}</button>`;
 }
 

@@ -238,7 +238,8 @@ row even if something above it changed (an exercise added in Settings, say). Tap
 you're on it goes to the top.
 
 Apple Health isn't reachable from a web app, so body weight is logged in the app (History → Body). Until it's
-logged in a week, the day due shows **Log body weight**, which takes it on the same keypad as the sets.
+logged in a week, the day due shows an amber **Log body weight** button, which takes it on the same keypad as
+the sets.
 
 ## PRs
 

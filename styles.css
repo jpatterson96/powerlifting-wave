@@ -4404,15 +4404,36 @@ main.is-show {
   margin-top: 12px;
 }
 
-/* The weekly weigh-in, under the day's clock. */
+/* The weekly weigh-in, under the day's clock: an amber outlined button, so it isn't read past as one more grey
+   note like the clock line above it. */
 .day-weigh {
   display: block;
-  margin: -6px 0 14px;
-  padding: 0;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 44px;
+  margin: 0 0 16px;
+  padding: 9px 16px;
+  border: 1.5px solid var(--warn-text);
+  border-radius: 12px;
+  background: rgba(242, 198, 109, 0.1);
+  color: var(--warn-text);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
   text-align: left;
 }
 
+.day-weigh:active {
+  transform: scale(0.98);
+}
+
+/* Under Start workout the two buttons sit a little closer. */
+.day-start + .day-weigh {
+  margin-top: -6px;
+}
+
 .day-weigh-last {
+  color: var(--chalk);
   font-weight: 500;
 }
 

@@ -3,7 +3,7 @@
 // moving or stuck; and behind the card a finished week gets on Train and the block review. No DOM access here so it
 // can be tested in Node.
 import {
-  LIFTS, WAVE_TWO, FIRST_TEST, SECOND_TEST, FINISH_WEEK, LB_PER_KG, FEELS, tidy, estimateMax, adjustMax, weekMax, setWeight, testResult, maxLifts,
+  LIFTS, WAVE_TWO, FIRST_TEST, SECOND_TEST, FINISH_WEEK, LB_PER_KG, tidy, estimateMax, adjustMax, weekMax, setWeight, testResult, maxLifts,
   liftRecord, prescription,
 } from './logic.js';
 import {
@@ -210,7 +210,7 @@ export function totals(state) {
 // ---------- A week ----------
 
 // One week of a block, for its card on Train: each day's top set (the heaviest weight, with the most reps done at
-// it), reps past and short of the prescription, and a heavy day's feel; the days trained and skipped; the week's
+// it) and reps past and short of the prescription; the days trained and skipped; the week's
 // sets, weight × reps and time as totals counts them; how many accessories made a new best; and the accessories done
 // of those due on the days trained (the day's list now, plus any done or skipped that have since left it).
 export function weekSummary(state, blockIndex, week) {
@@ -245,7 +245,6 @@ export function weekSummary(state, blockIndex, week) {
       top: weight === null ? null : { weight, reps: Math.max(...main.filter((m) => m.weight === weight).map((m) => m.reps)) },
       over: main.reduce((sum, m) => sum + Math.max(0, m.reps - target), 0),
       short: main.reduce((sum, m) => sum + Math.max(0, target - m.reps), 0),
-      feel: s.kind === 'heavy' && FEELS.includes(s.feel) ? s.feel : null,
     });
   });
   return { ...out, sets: t.sets, volume: tidy(t.volume), ms: t.ms, timed: t.timed };

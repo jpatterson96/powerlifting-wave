@@ -3,7 +3,7 @@ import {
   prescription, ROUNDING, REST_MODES, BAR, tidy, roundTo, workingMax, targetWeight, estimateMax, weekMax, attemptBase, attemptWeight, setWeight,
   singleWeight, restSeconds, platesPerSide, warmups, emptyState, newBlock, finishFor, setFinish, sessionStatus,
   weekProgress, nextSession, currentWeek, weekToRepeat, resetWeek, clearDay, longBreak, restartBlock, evaluateLift, liftHistory,
-  maxChanges, liftRecord, convertState, upgrade, PLATES, plateSizes, weekdayOf, dueSession, missedSessions, FEELS, GRINDS, heavyFeel,
+  maxChanges, liftRecord, convertState, upgrade, PLATES, plateSizes, weekdayOf, dueSession, missedSessions,
   touched, testResult, dayPct, heatOf, liftPath, weekHeat,
 } from './logic.js';
 import {
@@ -27,7 +27,7 @@ import {
 
 const KEY = 'powerlifting-wave';
 // The version running: the cache name in sw.js, bumped with it every release (a test checks they match).
-const VERSION = 'wave-v32';
+const VERSION = 'wave-v33';
 const view = document.getElementById('view');
 const tabs = document.getElementById('tabs');
 const toastEl = document.getElementById('toast');
@@ -461,7 +461,7 @@ function syncSection() {
   </section>`;
 }
 
-const HEAVY_CUE = 'Thursday and Friday are heavier days with fewer reps. They should feel smooth, with 2–4 reps left; harder than that means your max is set too high.';
+const HEAVY_CUE = 'Thursday and Friday are heavier days with fewer reps. Stop each set with 2–4 reps left; the week 3 and 6 test sets check your max.';
 const TEST_CUE = 'Monday to Wednesday, the last set (marked 2+) is as many clean reps as you can: use a spotter or safety arms.';
 
 function weekNote(b, week) {
@@ -629,43 +629,17 @@ const spanShort = (ms) => {
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
 };
 
-const FEEL_CHIP = { easy: 'is-up', smooth: '', grind: 'is-down' };
-
-// A day's mark under its top set: the feel picked on a heavy day, else reps short of or past the prescription.
+// A day's mark under its top set: reps short of or past the prescription.
 function dayChip(d) {
   if (d.skipped) return '<span class="recap-chip">Skipped</span>';
-  if (d.feel) return `<span class="recap-chip ${FEEL_CHIP[d.feel]}">${FEEL_TEXT[d.feel][0]}</span>`;
   if (d.short) return `<span class="recap-chip is-down" aria-label="${plural(d.short, 'rep')} short">−${d.short}</span>`;
   if (d.over) return `<span class="recap-chip is-up" aria-label="${plural(d.over, 'rep')} extra">+${d.over}</span>`;
   return '';
 }
 
-// What a finished week says to keep an eye on: heavy days that were a grind, and what a test week did to the maxes.
-function weekWatch(b, week, w) {
+// What a finished test week (3 or 6) did to the maxes.
+function weekWatch(b, week) {
   const notes = [];
-  const names = (lifts) => listDays(lifts.map((l) => l.short.toLowerCase()));
-  // In the week's order: bench before squat.
-  const ground = [...new Set(w.days.filter((d) => d.feel === 'grind').map((d) => d.lift))].map((id) => LIFTS.find((l) => l.id === id));
-  const many = ground.filter((l) => heavyFeel(b, l.id).grind >= GRINDS);
-  const once = ground.filter((l) => !many.includes(l));
-  if (many.length) {
-    notes.push({
-      down: true,
-      title: many.length === 1 ? `${plural(heavyFeel(b, many[0].id).grind, 'grind')} on heavy ${names(many)} days` : `${GRINDS} or more grinds each on ${names(many)}`,
-      text: state.trainingMax
-        ? `Already on a 90% training max, so lower ${many.length === 1 ? 'that max' : 'those maxes'} in Settings → Current maxes.`
-        : `That's a max set too high. Use a 90% training max in Settings → Work from, or lower it in Settings → Current maxes.`,
-    });
-  }
-  if (once.length) {
-    const next = week + 1 < FINISH_WEEK ? b.log[week + 1].filter((s) => s.kind === 'heavy' && once.some((l) => l.id === s.lift)) : [];
-    const ahead = next.map((s) => `${s.day.slice(0, 3)} ${liftOf(s).short.toLowerCase()} ${fmt(setWeight(b, s, week + 1, 0, state))}`);
-    notes.push({
-      down: true,
-      title: `${capital(names(once))} ground once${once.length > 1 ? ' each' : ''}`,
-      text: `A second grind this block says that max is set too high.${ahead.length ? ` Next week's heavy days: ${ahead.join(', ')}.` : ''}`,
-    });
-  }
   const tested = LIFTS.map((l) => ({ l, t: testResult(b, l.id, week, state) })).filter((x) => x.t);
   if (week === FIRST_TEST && tested.length) {
     const said = tested.map(({ l }) => {
@@ -687,7 +661,7 @@ function weekCard(b) {
   const { week, hide } = at;
   const w = weekSummary(state, state.blocks.length - 1, week);
   if (!w.trained) return '';
-  const days = w.days.map((d) => `<li class="${d.feel === 'grind' || d.short ? 'is-down' : ''}${d.skipped ? 'is-skipped' : ''}">
+  const days = w.days.map((d) => `<li class="${d.short ? 'is-down' : ''}${d.skipped ? 'is-skipped' : ''}">
       <span class="recap-day">${d.day.slice(0, 3)}</span>
       <span class="recap-top">${d.top ? `${fmt(d.top.weight)}×${d.top.reps}` : '–'}</span>
       <span class="recap-lift">${LIFTS.find((l) => l.id === d.lift).short}</span>
@@ -706,7 +680,7 @@ function weekCard(b) {
       ${w.bests ? `<div><dt>Bests</dt><dd>${w.bests}</dd></div>` : ''}
     </dl>
     <ul class="recap-days" style="--n:${w.days.length}" aria-label="Top set each day">${days}</ul>
-    ${weekWatch(b, week, w)}
+    ${weekWatch(b, week)}
     <div class="recap-foot">
       ${w.extrasDue ? `<p class="hint">${w.extrasDone} of ${plural(w.extrasDue, 'accessory')} done.</p>` : ''}
       <button class="btn-line" data-action="week-muscles" data-week="${week}">Sets per muscle</button>
@@ -861,7 +835,6 @@ function sessionBody(b, session, i) {
       ${session.reps.map((r, s) => setLight(session, i, s, r)).join('')}
     </div>
     ${testGuide(session)}
-    ${isHeavyDay(session) && sessionStatus(session) === 'done' ? feelCheck(b, session, i) : ''}
     ${dayEnd(session, i)}
     ${extrasSection(session, i)}
   </div>`;
@@ -901,38 +874,6 @@ function warmupList(session, i, ramp, note) {
 const SINGLE_REST = 180;
 const warmupRest = (session) => (session.kind !== 'max' && singleWeight(block(), session, ui.week, state)
   ? SINGLE_REST : restSeconds(session, ui.week, 0));
-
-// After the last set of a heavy day: how the sets moved, since heavy days should leave 2–4 reps in the tank. Two
-// grinds on a lift in a block say its max is set too high, which a 90% training max fixes.
-const FEEL_TEXT = { easy: ['Easy', '5+ left'], smooth: ['Smooth', '2–4 left'], grind: ['Grind', '0–1 left'] };
-const FEEL_SAID = {
-  easy: 'More in the tank than a heavy day needs. Your week 3 and 6 test sets will move the max if it’s low.',
-  smooth: 'Right where a heavy day should be.',
-  grind: `One grind can be a bad day. ${GRINDS} in a block says your max is set too high.`,
-};
-
-function feelCheck(b, session, i) {
-  const lift = liftOf(session);
-  const picks = FEELS.map((f) => `<button class="feel-pick" data-action="feel" data-index="${i}" data-feel="${f}" data-key="feel-${i}-${f}" aria-pressed="${session.feel === f}">
-      <strong>${FEEL_TEXT[f][0]}</strong><span>${FEEL_TEXT[f][1]}</span>
-    </button>`).join('');
-  const grinds = heavyFeel(b, lift.id).grind;
-  let said = session.feel ? `<p class="hint">${FEEL_SAID[session.feel]}</p>` : '';
-  if (session.feel === 'grind' && grinds >= GRINDS) {
-    const max = weekMax(b, lift.id, ui.week, state);
-    const now = targetWeight(workingMax(max, state), session.kind, ui.week, state.round);
-    const tm = targetWeight(max * 0.9, session.kind, ui.week, state.round);
-    said = state.trainingMax
-      ? `<p class="hint">That's ${grinds} grinds on heavy ${lift.short.toLowerCase()} days this block, already on a 90% training max. Lower your ${lift.short.toLowerCase()} max in Settings → Current maxes.</p>`
-      : `<p class="hint">That's ${grinds} grinds on heavy ${lift.short.toLowerCase()} days this block: your max is likely set too high. A 90% training max takes every percentage from 90% of your maxes, all three lifts, so today's ${fmt(now)} would have been ${fmt(tm)}.</p>
-        <button class="btn-line feel-tm" data-action="feel-tm" data-key="feel-tm-${i}">Use a 90% training max</button>`;
-  }
-  return `<section class="feel" aria-label="How the sets moved">
-    <h3 class="feel-title">How did they move?</h3>
-    <div class="feel-picks">${picks}</div>
-    ${said}
-  </section>`;
-}
 
 // Where a training day sits in the log, for finding the last time an accessory was done before it.
 const here = (index) => [state.blocks.length - 1, ui.week, index];
@@ -1715,7 +1656,6 @@ function reviewView() {
     </header>
     ${reviewTotal(results, total, n)}
     ${reviewMaxes(b, results)}
-    ${reviewHeavy(b, n)}
     ${reviewWork(sum)}
     ${reviewShowingUp(b, c, sum)}
     ${reviewExtras(n, sum)}
@@ -1819,36 +1759,6 @@ function pathChart(l, path, r) {
       <text class="review-chart-v is-new" x="${W - right + 8}" y="${y(r.suggested) + 5}" style="fill:${tone}">${fmt(r.suggested)}</text>
       ${weeks}
     </svg>`;
-}
-
-const FEEL_LETTER = { easy: 'E', smooth: 'S', grind: 'G' };
-
-// Every heavy day of the block, weeks 1–7, by how its sets moved.
-function reviewHeavy(b, n) {
-  const rows = LIFTS.map((l) => ({ l, feel: heavyFeel(b, l.id) })).filter((x) => x.feel.days);
-  if (!rows.length) return '';
-  const list = rows.map(({ l, feel }) => {
-    const days = b.log.slice(0, FINISH_WEEK).map((week) => {
-      const s = week.find((x) => x.lift === l.id && x.kind === 'heavy');
-      const f = s && !s.skipped && FEELS.includes(s.feel) ? s.feel : null;
-      return f ? `<i class="is-${f}">${FEEL_LETTER[f]}</i>` : '<i class="is-none">–</i>';
-    }).join('');
-    const counts = FEELS.filter((f) => feel[f]).map((f) => (f === 'grind' ? plural(feel[f], 'grind') : `${feel[f]} ${FEEL_TEXT[f][0].toLowerCase()}`));
-    return `<li>
-      <span class="review-feel-name">${l.short}</span>
-      <span class="review-feel-days" aria-hidden="true">${days}</span>
-      <span class="review-feel-said">${listDays(counts)}</span>
-    </li>`;
-  }).join('');
-  const ground = capital(listDays(rows.filter((x) => x.feel.grind >= GRINDS).map((x) => x.l.short.toLowerCase())));
-  const advice = !ground ? ''
-    : state.trainingMax ? ` ${ground} ground ${GRINDS} or more times even on a 90% training max: start block ${n + 1} lower.`
-      : ` ${ground} ground ${GRINDS} or more times, a sign the heavy days ran too close to the max: switch to a 90% training max in Settings → Work from, or start block ${n + 1} lower.`;
-  return `<section class="chart-block">
-    <h2 class="chart-title">Heavy days</h2>
-    <ul class="review-feel">${list}</ul>
-    <p class="hint">Each heavy day in weeks 1 to 7: easy, smooth or a grind.${advice}</p>
-  </section>`;
 }
 
 // Everything lifted in the block, and each week's weight × reps.
@@ -2488,7 +2398,7 @@ function settingsView() {
     <fieldset class="setting">
       <legend class="setting-title">Work from</legend>
       ${segmented('trainingMax', maxOptions, String(state.trainingMax))}
-      <p class="hint">Switch to a 90% training max if your max was a grind, or your 2+ sets start coming up short.</p>
+      <p class="hint">Switch to a 90% training max if your 2+ sets start coming up short.</p>
     </fieldset>
     <fieldset class="setting">
       <legend class="setting-title">Rest timer</legend>
@@ -3504,19 +3414,6 @@ const ACTIONS = {
     render();
     if (rests) rest.start(warmupRest(session), nextLabel(session, 0));
     if (starts) toast('Workout started.');
-  },
-  feel(el) {
-    const session = sessionAt(Number(el.dataset.index));
-    if (session.feel === el.dataset.feel) delete session.feel;
-    else session.feel = el.dataset.feel;
-    save();
-    render();
-  },
-  'feel-tm'() {
-    state.trainingMax = true;
-    save();
-    render();
-    toast('Working from a 90% training max. Switch back in Settings → Work from.');
   },
   'bodyweight-open'() {
     openBodyweight();

@@ -267,22 +267,6 @@ function topWeight(block, session, week, state) {
   return Math.max(weights.at(-1), singleWeight(block, session, week, state) ?? 0);
 }
 
-// How a heavy day's sets moved, picked once they're all logged. Heavy days should leave 2-4 reps in the tank;
-// GRINDS grinds on one lift in a block say its max is set too high.
-export const FEELS = ['easy', 'smooth', 'grind'];
-export const GRINDS = 2;
-
-// The heavy days of one lift in a block (weeks 1-7) with a feel picked, counted by feel.
-export function heavyFeel(block, liftId) {
-  const count = { easy: 0, smooth: 0, grind: 0, days: 0 };
-  block.log.slice(0, FINISH_WEEK).flat().forEach((s) => {
-    if (s.lift !== liftId || s.kind !== 'heavy' || s.skipped || !FEELS.includes(s.feel)) return;
-    count[s.feel] += 1;
-    count.days += 1;
-  });
-  return count;
-}
-
 // Seconds of rest before the next set by lift and load: bench recovers fastest, deadlift slowest, and
 // test sets and re-max attempts get the most. Each is a minimum; add up to a minute after a slow set.
 const REST = {

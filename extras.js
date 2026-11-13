@@ -1,6 +1,6 @@
 // Accessory exercises: the lifter's own list, logged with each training day and progressed by rep range
 // (double progression). No DOM access here so it can be tested in Node.
-import { LIFTS, SCHEDULE, BAR, PLATES, FEELS, FINISH_WEEK, estimateMax, tidy, roundTo } from './logic.js';
+import { LIFTS, SCHEDULE, BAR, PLATES, FINISH_WEEK, estimateMax, tidy, roundTo } from './logic.js';
 import { picKeys } from './pics.js';
 import { MUSCLES, LIFT_MUSCLES, isOldMuscle, fillMuscles, creditsOf } from './muscles.js';
 
@@ -606,7 +606,8 @@ export function cleanExtras(state) {
       for (const s of week) {
         if (s.extras !== undefined) s.extras = Array.isArray(s.extras) ? cleanEntries(s.extras) : [];
         if (s.date !== undefined && !isDate(s.date)) delete s.date;
-        if (s.feel !== undefined && !FEELS.includes(s.feel)) delete s.feel;
+        // Heavy days used to be marked easy, smooth or a grind; the test sets check the max now.
+        delete s.feel;
         cleanTiming(s);
       }
     }

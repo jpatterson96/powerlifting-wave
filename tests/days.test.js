@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  newBlock, prescription, weekdayOf, dueSession, missedSessions, heavyFeel, FINISH_WEEK, platesPerSide, plateSizes, emptyState,
+  newBlock, prescription, weekdayOf, dueSession, missedSessions, platesPerSide, plateSizes, emptyState,
   convertState,
 } from '../logic.js';
 
@@ -82,20 +82,6 @@ test('a finished block has no day due and nothing missed', () => {
   assert.deepEqual(missedSessions(b, '2026-12-28'), []);
 });
 
-test('heavy days are counted by how they moved, one lift at a time, leaving out week 8', () => {
-  const b = newBlock(MAX, '2026-11-02', 'deload');
-  const heavy = (week, day, feel) => { b.log[week].find((s) => s.day === day).feel = feel; };
-  heavy(0, 'Thursday', 'smooth');
-  heavy(1, 'Thursday', 'grind');
-  heavy(2, 'Thursday', 'grind');
-  heavy(1, 'Friday', 'easy');
-  heavy(FINISH_WEEK, 'Thursday', 'grind');
-  // Only heavy days count: a template day's feel is ignored.
-  b.log[0].find((s) => s.day === 'Monday').feel = 'grind';
-  assert.deepEqual(heavyFeel(b, 'bench'), { easy: 0, smooth: 1, grind: 2, days: 3 });
-  assert.deepEqual(heavyFeel(b, 'squat'), { easy: 1, smooth: 0, grind: 0, days: 1 });
-  assert.deepEqual(heavyFeel(b, 'deadlift'), { easy: 0, smooth: 0, grind: 0, days: 0 });
-});
 
 test('plate math uses only the plates owned', () => {
   const state = { ...emptyState(), platesOwned: [45, 25, 10, 5, 2.5] };

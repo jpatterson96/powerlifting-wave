@@ -509,7 +509,7 @@ test('a settled day teaches the list its order: what was done in the order start
   assert.equal(learnOrder(state, b.log[1][0]), false);
 });
 
-test('warm-up ticks, how a heavy day moved and the plates owned are kept when they check out', () => {
+test('warm-up ticks and the plates owned are kept when they check out, and an old heavy-day feel is dropped', () => {
   const { state } = setup();
   const [mon, , , thu] = state.blocks[0].log[0];
   mon.warmups = ['2026-11-02T16:30:00.000Z', null, '2026-11-02T16:38:00.000Z'];
@@ -517,11 +517,11 @@ test('warm-up ticks, how a heavy day moved and the plates owned are kept when th
   state.platesOwned = [45, 25, 10, 5, 2.5];
   const clean = cleanExtras(upgrade(JSON.parse(JSON.stringify(state))));
   assert.deepEqual(clean.blocks[0].log[0][0].warmups, mon.warmups);
-  assert.equal(clean.blocks[0].log[0][3].feel, 'grind');
+  assert.equal(clean.blocks[0].log[0][3].feel, undefined);
+  assert.equal(clean.blocks[0].log[0][3].reps.length, 3);
   assert.deepEqual(clean.platesOwned, [45, 25, 10, 5, 2.5]);
   // Anything else is dropped, keeping the rest of the log.
   Object.assign(mon, { warmups: ['yesterday'] });
-  Object.assign(thu, { feel: 'heavy' });
   for (const owned of [[], [45, 30], 'all']) {
     const bad = cleanExtras(upgrade(JSON.parse(JSON.stringify({ ...state, platesOwned: owned }))));
     assert.equal(bad.platesOwned, undefined);

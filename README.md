@@ -19,10 +19,9 @@ Live at https://jpatterson96.github.io/powerlifting-wave/
 
 Volume early in the week and intensity later, 72 hours apart for the same lift, is the Texas
 Method's order; putting the heavier day last has also tested well for bench (Zourdos et al. 2016).
-Heavy days should feel smooth, with 2–4 reps left. Harder than that means the max is set too high, so once a
-heavy day's sets are all logged the app asks how they moved: **Easy** (5+ left), **Smooth** (2–4) or **Grind**
-(0–1). A second grind on the same lift in a block offers a 90% training max in one tap, and the block review
-counts each lift's heavy days by how they felt.
+Heavy days should leave 2–4 reps in the tank. The app doesn't ask how they felt: the later sets of a heavy day
+are always harder than the first, so a feel rating mixes fatigue in with strength. The week 3 and 6 test sets
+check the max instead (see **How maxes are set**).
 
 The background follows how heavy the day on screen is, from its top set's share of the max: a glow rises from the
 bottom of the screen, blue on a 70% day, then violet and magenta, ember by week 6's 92.5% singles and gold on
@@ -37,9 +36,8 @@ starts the workout clock, like **Start workout**, and ticking the last step star
 set (or the opener): the first set's rest, or 3 minutes after the taper week's heavy single.
 
 Once every day of a week is done or skipped, a card at the top of Train sums it up: days trained, sets, volume,
-time from Start to End workout, new accessory bests, and each day's top set marked with its feel on a heavy day,
-or with reps past or short of the plan. Grinds get a note with next week's heavy weights for that lift, and the
-test weeks (3 and 6) say what the test sets did to the maxes. The card stays on top of the next week until
+time from Start to End workout, new accessory bests, and each day's top set marked with
+reps past or short of the plan. The test weeks (3 and 6) say what the test sets did to the maxes. The card stays on top of the next week until
 anything in it is done, or **Hide** is tapped; it's also there whenever the finished week is picked. **Sets per
 muscle** opens that week in History → Muscles. Week 8 gets the block review instead. The card takes its week's heaviest colour, cool for week 1 and hot by week 6.
 
@@ -63,14 +61,14 @@ week 8 screen before anything in it is logged, and is chosen for the next block 
 
 **Finish block**, under week 8, opens the block review. It starts with the total the next block trains from and
 each lift's new max. Then a chart per lift shows how the max moved: the max trained from, the week 3 and 6 test
-sets' estimates, the re-max attempts made or missed, and why the new max is what it is. After that come every
-heavy day's feel; the block's sets, volume and average time a day, with a bar for each week; the days trained and
+sets' estimates, the re-max attempts made or missed, and why the new max is what it is. After that come the
+block's sets, volume and average time a day, with a bar for each week; the days trained and
 skipped and the share of accessories done; the accessories that went up most and any that are stuck; and body
 weight from the block's first weigh-in to its last. The new maxes come last, ready to change, above **Start
 block**. The review is only there until the next block starts.
 
-**Settings → Work from** switches the percentages to a 90% training max, for when a max was a grind
-or the "2+" sets start coming up short. Re-max attempts always use the real max.
+**Settings → Work from** switches the percentages to a 90% training max, for when the
+"2+" sets start coming up short. Re-max attempts always use the real max.
 
 ## How maxes are set
 

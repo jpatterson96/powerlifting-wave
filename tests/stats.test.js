@@ -147,7 +147,7 @@ test('a week sums up each day against its plan, the accessories due and the new 
   ensureEntry(tue, curl, null).sets = [{ weight: 190, reps: 10 }, { weight: 190, reps: 8 }];
   ensureEntry(tue, calf, null).skipped = true;
   const thu = day(b, 0, 'Thursday');
-  Object.assign(thu, { reps: [4, 4, 5], feel: 'grind', date: '2026-11-05', started: '2026-11-05T17:00:00Z', ended: '2026-11-05T18:00:00Z' });
+  Object.assign(thu, { reps: [4, 4, 5], date: '2026-11-05', started: '2026-11-05T17:00:00Z', ended: '2026-11-05T18:00:00Z' });
   const fri = day(b, 0, 'Friday');
   Object.assign(fri, { reps: [4, 4, 4], date: '2026-11-06' }); // 300
   ensureEntry(fri, curl, null).sets = [{ weight: 190, reps: 12 }, { weight: 190, reps: 8 }];
@@ -156,12 +156,12 @@ test('a week sums up each day against its plan, the accessories due and the new 
     from: '2026-11-03', to: '2026-11-06', days: undefined, trained: 4, skipped: 1, bests: 1, extrasDone: 2, extrasDue: 3,
     sets: 16, volume: 220 * 19 + 270 * 17 + 245 * 13 + 300 * 12 + 190 * 38, ms: 3600000, timed: 1,
   });
-  assert.deepEqual(w.days.map((d) => [d.day, d.top, d.over, d.short, d.feel]), [
-    ['Monday', { weight: 220, reps: 7 }, 1, 0, null],
-    ['Tuesday', { weight: 270, reps: 6 }, 0, 1, null],
-    ['Wednesday', undefined, undefined, undefined, undefined],
-    ['Thursday', { weight: 245, reps: 5 }, 1, 0, 'grind'],
-    ['Friday', { weight: 300, reps: 4 }, 0, 0, null],
+  assert.deepEqual(w.days.map((d) => [d.day, d.top, d.over, d.short]), [
+    ['Monday', { weight: 220, reps: 7 }, 1, 0],
+    ['Tuesday', { weight: 270, reps: 6 }, 0, 1],
+    ['Wednesday', undefined, undefined, undefined],
+    ['Thursday', { weight: 245, reps: 5 }, 1, 0],
+    ['Friday', { weight: 300, reps: 4 }, 0, 0],
   ]);
   assert.equal(w.days[2].skipped, true);
 });
